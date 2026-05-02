@@ -1,0 +1,11 @@
+#pragma once
+
+#define HOLYUUV_GCS_NAME            "HolyUUV GCS"
+#define HOLYUUV_GCS_MANUFACTURER    "HolyTorch"
+#define HOLYUUV_GCS_VERSION_MAJOR   0
+#define HOLYUUV_GCS_VERSION_MINOR   1
+#define HOLYUUV_GCS_VERSION_PATCH   0
+
+#ifndef HOLYUUV_GCS_BUILD_DATE
+#define HOLYUUV_GCS_BUILD_DATE "00000000"
+#endif

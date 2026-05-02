@@ -1,0 +1,24 @@
+{
+	"BUILD_DIR" : "/home/yoo/gcs_ws/HolyUUV_GCS/build/HolyUUV_GCS_autogen",
+	"CMAKE_BINARY_DIR" : "/home/yoo/gcs_ws/HolyUUV_GCS/build",
+	"CMAKE_CURRENT_BINARY_DIR" : "/home/yoo/gcs_ws/HolyUUV_GCS/build",
+	"CMAKE_CURRENT_SOURCE_DIR" : "/home/yoo/gcs_ws/HolyUUV_GCS",
+	"CMAKE_SOURCE_DIR" : "/home/yoo/gcs_ws/HolyUUV_GCS",
+	"GENERATOR" : "Unix Makefiles",
+	"INCLUDE_DIR" : "/home/yoo/gcs_ws/HolyUUV_GCS/build/HolyUUV_GCS_autogen/include",
+	"INPUTS" : 
+	[
+		"/home/yoo/gcs_ws/HolyUUV_GCS/resources/USBBoardInfo.json",
+		"/home/yoo/gcs_ws/HolyUUV_GCS/resources/qml/MapView.qml"
+	],
+	"LOCK_FILE" : "/home/yoo/gcs_ws/HolyUUV_GCS/build/CMakeFiles/HolyUUV_GCS_autogen.dir/AutoRcc_resources_3YJK5W5UP7_Lock.lock",
+	"MULTI_CONFIG" : false,
+	"OPTIONS" : [ "-name", "resources" ],
+	"OUTPUT_CHECKSUM" : "3YJK5W5UP7",
+	"OUTPUT_NAME" : "qrc_resources.cpp",
+	"RCC_EXECUTABLE" : "/usr/lib/qt5/bin/rcc",
+	"RCC_LIST_OPTIONS" : [ "--list" ],
+	"SETTINGS_FILE" : "/home/yoo/gcs_ws/HolyUUV_GCS/build/CMakeFiles/HolyUUV_GCS_autogen.dir/AutoRcc_resources_3YJK5W5UP7_Used.txt",
+	"SOURCE" : "/home/yoo/gcs_ws/HolyUUV_GCS/resources/resources.qrc",
+	"VERBOSITY" : 0
+}

@@ -1,0 +1,6 @@
+<RCC>
+    <qresource prefix="/">
+        <file>USBBoardInfo.json</file>
+        <file>qml/MapView.qml</file>
+    </qresource>
+</RCC>
