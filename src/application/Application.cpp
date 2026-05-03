@@ -6,6 +6,8 @@
 
 Application::Application(QObject* parent) : QObject(parent)
 {
+    _tileServer.start();
+
     // 링크 상태 → MainWindow
     connect(&_linkManager, &LinkManager::linkConnected,
             &_mainWindow, &MainWindow::onLinkConnected);

@@ -11,9 +11,10 @@ Item {
 
         plugin: Plugin {
             name: "osm"
+            // TileServer(127.0.0.1:17777)가 SQLite 캐시 확인 후 CartoDB로 프록시
             PluginParameter {
                 name: "osm.mapping.custom.host"
-                value: "https://a.basemaps.cartocdn.com/dark_all/"
+                value: "http://127.0.0.1:17777/"
             }
             PluginParameter {
                 name: "osm.mapping.cache.directory"

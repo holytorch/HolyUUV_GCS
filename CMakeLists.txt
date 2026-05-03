@@ -19,7 +19,7 @@ MESSAGE(STATUS "Project: ${PROJECT_NAME}")
 # ─────────────────────────────────────────────
 # Qt5
 # ─────────────────────────────────────────────
-FIND_PACKAGE(Qt5 REQUIRED COMPONENTS Core Widgets Network SerialPort Location Quick QuickWidgets Positioning)
+FIND_PACKAGE(Qt5 REQUIRED COMPONENTS Core Widgets Network SerialPort Location Quick QuickWidgets Positioning Sql)
 
 # ─────────────────────────────────────────────
 # MAVLink (header-only, c_library_v2)
@@ -50,6 +50,9 @@ SET(SOURCES
     src/comm/TcpLink.cpp
     src/mavlink/MavlinkManager.cpp
     src/ui/MapBridge.cpp
+    src/map/TileCache.cpp
+    src/map/TileCacheWorker.cpp
+    src/map/TileServer.cpp
 )
 
 SET(RESOURCES
@@ -76,4 +79,5 @@ TARGET_LINK_LIBRARIES(${PROJECT_NAME} PRIVATE
     Qt5::Quick
     Qt5::QuickWidgets
     Qt5::Positioning
+    Qt5::Sql
 )
