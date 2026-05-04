@@ -19,7 +19,8 @@ MESSAGE(STATUS "Project: ${PROJECT_NAME}")
 # ─────────────────────────────────────────────
 # Qt5
 # ─────────────────────────────────────────────
-FIND_PACKAGE(Qt5 REQUIRED COMPONENTS Core Widgets Network SerialPort Location Quick QuickWidgets Positioning Sql)
+FIND_PACKAGE(Qt5 REQUIRED COMPONENTS Core Widgets Network SerialPort Location Quick QuickWidgets Positioning Sql
+             3DCore 3DRender 3DExtras 3DInput)
 
 # ─────────────────────────────────────────────
 # MAVLink (header-only, c_library_v2)
@@ -53,6 +54,8 @@ SET(SOURCES
     src/map/TileCache.cpp
     src/map/TileCacheWorker.cpp
     src/map/TileServer.cpp
+    src/terrain/TerrainTile.cpp
+    src/terrain/TerrainWidget.cpp
 )
 
 SET(RESOURCES
@@ -63,6 +66,7 @@ ADD_EXECUTABLE(${PROJECT_NAME} ${SOURCES} ${RESOURCES})
 
 TARGET_INCLUDE_DIRECTORIES(${PROJECT_NAME} PRIVATE
     src
+    src/terrain
 )
 
 # MAVLink은 서드파티 헤더라 경고 억제
@@ -80,4 +84,8 @@ TARGET_LINK_LIBRARIES(${PROJECT_NAME} PRIVATE
     Qt5::QuickWidgets
     Qt5::Positioning
     Qt5::Sql
+    Qt5::3DCore
+    Qt5::3DRender
+    Qt5::3DExtras
+    Qt5::3DInput
 )

@@ -5,6 +5,7 @@
 #include <QQuickWidget>
 #include "vehicle/VehicleState.h"
 #include "ui/MapBridge.h"
+#include "terrain/TerrainWidget.h"
 
 class MainWindow : public QMainWindow {
     Q_OBJECT
@@ -49,6 +50,8 @@ private:
     QLabel* _labelLatLon     = nullptr;
 
     // 맵
-    MapBridge    _mapBridge;
-    QQuickWidget* _mapWidget = nullptr;
+    MapBridge     _mapBridge;
+    QQuickWidget* _mapWidget     = nullptr;
+    QQuickWidget* _gebcoWidget   = nullptr;
+    TerrainWidget* _terrainWidget = nullptr;
 };

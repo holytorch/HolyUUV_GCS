@@ -78,14 +78,32 @@ void MainWindow::_setupUi()
     root->addStretch();
     tabs->addTab(statusTab, "Status");
 
-    // ── Map 탭 ──────────────────────────────────────
+    // ── OSM 맵 탭 ───────────────────────────────────
     _mapBridge.initCacheDir();
 
     _mapWidget = new QQuickWidget();
     _mapWidget->rootContext()->setContextProperty("bridge", &_mapBridge);
     _mapWidget->setSource(QUrl("qrc:/qml/MapView.qml"));
     _mapWidget->setResizeMode(QQuickWidget::SizeRootObjectToView);
-    tabs->addTab(_mapWidget, "Map");
+    tabs->addTab(_mapWidget, "OSM");
+
+    // ── GEBCO 탭 ────────────────────────────────────
+    _gebcoWidget = new QQuickWidget();
+    _gebcoWidget->rootContext()->setContextProperty("bridge", &_mapBridge);
+    _gebcoWidget->setSource(QUrl("qrc:/qml/GebcoView.qml"));
+    _gebcoWidget->setResizeMode(QQuickWidget::SizeRootObjectToView);
+    tabs->addTab(_gebcoWidget, "GEBCO");
+
+    // ── 3D 지형 탭 ──────────────────────────────────
+    _terrainWidget = new TerrainWidget();
+    tabs->addTab(_terrainWidget, "3D Terrain");
+
+    // GEBCO 맵 중심으로 3D 탭 자동 로드
+    connect(tabs, &QTabWidget::currentChanged, [this, tabs](int) {
+        if (tabs->currentWidget() == _terrainWidget)
+            _terrainWidget->loadTile(_mapBridge.mapCenterLat(), _mapBridge.mapCenterLon(),
+                                     _terrainWidget->currentZoom());
+    });
 
     setCentralWidget(tabs);
 }
@@ -122,6 +140,7 @@ void MainWindow::onGpsChanged()
         .arg(_state->longitude(), 0, 'f', 6));
 
     _mapBridge.updatePosition(_state->latitude(), _state->longitude());
+    _terrainWidget->updateVehiclePosition(_state->latitude(), _state->longitude());
 }
 
 void MainWindow::onLinkConnected()

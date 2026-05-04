@@ -11,20 +11,26 @@ Item {
 
         plugin: Plugin {
             name: "osm"
-            // TileServer(127.0.0.1:17777)가 SQLite 캐시 확인 후 CartoDB로 프록시
+            // TileServer가 /gebco/ 경로를 GEBCO 타일 서버로 중계
             PluginParameter {
                 name: "osm.mapping.custom.host"
-                value: "http://127.0.0.1:17777/osm/"
+                value: "http://127.0.0.1:17777/gebco/"
             }
             PluginParameter {
                 name: "osm.mapping.cache.directory"
-                value: bridge ? bridge.tileCachePath + "/osm" : "/tmp/holyuuv_tiles/osm"
+                value: bridge ? bridge.tileCachePath + "/gebco" : "/tmp/holyuuv_tiles/gebco"
             }
             PluginParameter { name: "osm.mapping.cache.disk.cost_strategy"; value: "unitary" }
         }
 
         center: QtPositioning.coordinate(35.074857, 129.084836)
-        zoomLevel: 10
+        zoomLevel: 6
+        minimumZoomLevel: 0
+        maximumZoomLevel: 10.9  // ESRI Ocean 데이터 최대 줌레벨
+
+        onCenterChanged: {
+            if (bridge) bridge.updateMapCenter(center.latitude, center.longitude)
+        }
 
         Component.onCompleted: {
             for (var i = 0; i < supportedMapTypes.length; i++) {
@@ -60,6 +66,18 @@ Item {
                 _vehicleMarker.coordinate = QtPositioning.coordinate(
                     bridge.latitude, bridge.longitude)
             }
+        }
+
+        // 줌레벨 표시
+        Text {
+            anchors.bottom: parent.bottom
+            anchors.right: parent.right
+            anchors.margins: 8
+            text: "zoom: " + _map.zoomLevel.toFixed(1)
+            color: "white"
+            font.pixelSize: 14
+            style: Text.Outline
+            styleColor: "black"
         }
     }
 }

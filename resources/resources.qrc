@@ -2,5 +2,6 @@
     <qresource prefix="/">
         <file>USBBoardInfo.json</file>
         <file>qml/MapView.qml</file>
+        <file>qml/GebcoView.qml</file>
     </qresource>
 </RCC>
