@@ -61,5 +61,16 @@ Item {
                     bridge.latitude, bridge.longitude)
             }
         }
+
+        Text {
+            anchors.bottom: parent.bottom
+            anchors.right: parent.right
+            anchors.margins: 8
+            text: "zoom: " + _map.zoomLevel.toFixed(1)
+            color: "white"
+            font.pixelSize: 14
+            style: Text.Outline
+            styleColor: "black"
+        }
     }
 }

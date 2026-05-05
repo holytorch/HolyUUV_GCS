@@ -1,129 +1,181 @@
 #include "TerrainWidget.h"
 
-#include <QVBoxLayout>
-#include <QHBoxLayout>
-#include <QLabel>
-#include <QPushButton>
-#include <QSpinBox>
-#include <QNetworkRequest>
-#include <QNetworkReply>
-#include <QUrl>
-#include <QDebug>
-#include <cmath>
+// Qt UI 위젯
+#include <QVBoxLayout>       // 세로 레이아웃
+#include <QHBoxLayout>       // 가로 레이아웃
+#include <QLabel>            // 텍스트 표시 위젯
+#include <QPushButton>       // 버튼 위젯
+#include <QSpinBox>          // 숫자 입력 위젯
+// Qt 네트워크
+#include <QNetworkRequest>   // HTTP 요청 객체
+#include <QNetworkReply>     // HTTP 응답 객체
+// Qt 기타
+#include <QUrl>              // URL 문자열 처리
+#include <QDebug>            // 디버그 출력 (qDebug, qWarning)
+#include <QDir>              // 디렉터리/경로 처리
+#include <QPainter>          // 이미지에 그림 그리기
+#include <cmath>             // cos, sin, log, atan 등 수학 함수
 
-// Qt3D
-#include <Qt3DCore/QEntity>
-#include <Qt3DCore/QTransform>
-#include <Qt3DExtras/Qt3DWindow>
-#include <Qt3DExtras/QOrbitCameraController>
-#include <Qt3DExtras/QPhongMaterial>
-#include <Qt3DExtras/QForwardRenderer>
-#include <Qt3DExtras/QText2DEntity>
-#include <Qt3DExtras/QSphereMesh>
-#include <Qt3DExtras/QCylinderMesh>
-#include <Qt3DExtras/QConeMesh>
-#include <Qt3DExtras/QPerVertexColorMaterial>
-#include <Qt3DExtras/QPhongAlphaMaterial>
-#include <Qt3DExtras/QPlaneMesh>
-#include <Qt3DRender/QDirectionalLight>
-#include <Qt3DRender/QCamera>
-#include <Qt3DRender/QGeometry>
-#include <Qt3DRender/QGeometryRenderer>
-#include <Qt3DRender/QAttribute>
-#include <Qt3DRender/QBuffer>
+// Qt3D 씬 구조
+#include <Qt3DCore/QEntity>              // 씬의 모든 오브젝트 기반 클래스
+#include <Qt3DCore/QTransform>           // 위치/회전/스케일 컴포넌트
+// Qt3D 렌더링 창 및 카메라
+#include <Qt3DExtras/Qt3DWindow>         // 3D 렌더링 전용 창
+#include <Qt3DExtras/QOrbitCameraController>  // 마우스로 카메라 회전/줌
+#include <Qt3DExtras/QForwardRenderer>   // 기본 렌더러 (setClearColor 접근에 필요)
+// Qt3D 메시/재질
+#include <Qt3DExtras/QSphereMesh>        // 구체 메시 (차량 마커용)
+#include <Qt3DExtras/QPhongMaterial>     // 기본 조명 재질
+#include <Qt3DExtras/QDiffuseMapMaterial>// 텍스처 입히는 재질
+// Qt3D 텍스처
+#include <Qt3DRender/QTexture>           // GPU 텍스처 객체
+#include <Qt3DRender/QTextureImage>      // 파일에서 텍스처 로드
+// Qt3D 입력/조명/카메라
+#include <Qt3DInput/QInputSettings>      // 마우스/키보드 이벤트 소스 지정
+#include <Qt3DRender/QDirectionalLight>  // 방향성 조명 (태양광 같은 것)
+#include <Qt3DRender/QCamera>            // 카메라 (시점, FOV, 클리핑)
+// Qt3D 지오메트리 (직접 정점 데이터 구성)
+#include <Qt3DRender/QGeometry>          // 정점/인덱스 데이터 컨테이너
+#include <Qt3DRender/QGeometryRenderer>  // 지오메트리를 실제로 그리는 컴포넌트
+#include <Qt3DRender/QAttribute>         // 정점 속성 (위치, 노말, UV 등)
+#include <Qt3DRender/QBuffer>            // GPU에 올릴 바이트 버퍼
 
-// ─────────────────────────────────────────────
-// 좌표계 정의:
-//   X  = 동쪽 (East)   +X → 오른쪽
-//  -Z  = 북쪽 (North)  -Z → 화면 안쪽 (카메라 기본 시선 방향)
-//   Y  = 위  (Up)
-//
-// 타일 픽셀 → 3D 좌표 변환:
-//   col 0   = 서쪽(West)  → X = -halfW
-//   col W-1 = 동쪽(East)  → X = +halfW
-//   row 0   = 북쪽(North) → Z = -halfH   (타일 row0이 북쪽)
-//   row H-1 = 남쪽(South) → Z = +halfH
-// ─────────────────────────────────────────────
+// OSM 타일 URL 템플릿: %1=zoom, %2=tileX, %3=tileY
+// TileServer(포트 17777)가 로컬에서 OSM 타일을 중계
+static const QString OSM_URL = "http://localhost:17777/osm/%1/%2/%3.png";
 
-// GEBCO 색상 기반 수심 추정 (Terrarium 대체)
-static const QString TERRAIN_URL = "http://127.0.0.1:17777/gebco/%1/%2/%3.png";
+// =============================================================
+// Web Mercator 좌표 변환 유틸 3개
+// =============================================================
 
-// zoom z, 위도 lat(도)에서의 미터/픽셀 (Web Mercator)
+// 해당 위도·줌에서 1픽셀 = 몇 미터인지 반환
+// → 3km를 픽셀 수로 변환할 때 사용 (1500m / mpp = halfPx)
 double TerrainWidget::metersPerPixel(double lat, int z)
 {
     return 156543.03392 * std::cos(lat * M_PI / 180.0) / std::pow(2.0, z);
 }
 
-// ─────────────────────────────────────────────
-// 생성자
-// ─────────────────────────────────────────────
+// 글로벌 픽셀 X좌표 → 경도(°) 변환
+// 전체 지도 가로 픽셀 = 256 * 2^z, 경도 범위 -180~+180
+double TerrainWidget::globalPixToLon(double gx, int z)
+{
+    return gx / (256.0 * (1 << z)) * 360.0 - 180.0;
+}
+
+// 글로벌 픽셀 Y좌표 → 위도(°) 변환
+// 메르카토르 도법은 위도가 비선형이라 sinh/atan 필요
+double TerrainWidget::globalPixToLat(double gy, int z)
+{
+    double n = static_cast<double>(1 << z);   // 2^z
+    return std::atan(std::sinh(M_PI * (1.0 - 2.0 * gy / (n * 256.0)))) * 180.0 / M_PI;
+}
+
+// =============================================================
+// 생성자: Qt3D 씬 초기화 + UI 구성
+// =============================================================
 TerrainWidget::TerrainWidget(QWidget* parent)
     : QWidget(parent)
 {
+    // Qt3DWindow: OpenGL 렌더링 전용 창 (QWindow 기반, QWidget이 아님)
     _view = new Qt3DExtras::Qt3DWindow();
+    // 배경색: RGB(15,18,30) ≈ 거의 검정인 남색
     _view->defaultFrameGraph()->setClearColor(QColor(15, 18, 30));
-    _viewport = QWidget::createWindowContainer(_view, this);
-    _viewport->setMinimumSize(400, 300);
-    _viewport->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
 
+    // Qt UI 시스템
+    // ├── QWidget 계열  → 버튼, 레이블, 레이아웃 등 일반 UI
+    // └── QWindow 계열  → OpenGL/Vulkan 등 GPU 렌더링
+    _viewport = QWidget::createWindowContainer(_view, this);
+    _viewport->setMinimumSize(400, 300);                              // 최소 크기 400×300px
+    _viewport->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding); // 여유 공간 있으면 최대한 늘어남
+
+    // 씬의 최상위 엔티티: 모든 3D 오브젝트의 공통 조상 (트리구조라고 함)
     _rootEntity = new Qt3DCore::QEntity();
     _view->setRootEntity(_rootEntity);
 
-    // ── 카메라: 남쪽(+Z)에서 높이를 두고 북쪽(-Z)을 바라봄 ──
-    // 지도와 같은 방향: 화면 위쪽 = 북쪽
-    Qt3DRender::QCamera* cam = _view->camera();
-    cam->setProjectionType(Qt3DRender::QCameraLens::PerspectiveProjection);
-    cam->setFieldOfView(60.0f);
-    cam->setNearPlane(0.1f);
-    cam->setFarPlane(10000.0f);
-    // 남동쪽 상공에서 북서쪽 바다를 사선으로 내려다보는 시점
-    cam->setPosition(QVector3D(60, 160, 220));
-    cam->setViewCenter(QVector3D(0, -10, -30));
-    cam->setUpVector(QVector3D(0, 1, 0));
+    // 마우스/키보드 이벤트를 Qt3DWindow에서 받도록 지정
+    // QWidget(_viewport)으로 설정하면 카메라가 동작하지 않음
+    auto* inputSettings = new Qt3DInput::QInputSettings(_rootEntity);
+    inputSettings->setEventSource(_view);
 
+    // 카메라 설정 (바꿀필요 ㅇㅇ)
+    Qt3DRender::QCamera* cam = _view->camera();
+    cam->setProjectionType(Qt3DRender::QCameraLens::PerspectiveProjection); // 원근 투영 (가까울수록 크게)
+    cam->setFieldOfView(60.0f);          // 시야각 60° (사람 눈과 유사)
+    cam->setNearPlane(0.1f);             // 이보다 가까운 건 안 그림
+    cam->setFarPlane(10000.0f);          // 이보다 먼 건 안 그림
+    cam->setPosition(QVector3D(0, 179, 128));     // zoom17 기준 700m 위, 남쪽 500m
+    cam->setViewCenter(QVector3D(0, 0, 0));      // 맵 중심 바라봄
+    cam->setUpVector(QVector3D(0, 1, 0));        // Y축이 위쪽
+
+    // 궤도 카메라 컨트롤러: 마우스 좌클릭=회전, 우클릭=줌, 중클릭=패닝
     _camCtrl = new Qt3DExtras::QOrbitCameraController(_rootEntity);
     _camCtrl->setCamera(cam);
-    _camCtrl->setLinearSpeed(400.0f);
-    _camCtrl->setLookSpeed(180.0f);
+    _camCtrl->setLinearSpeed(-400.0f);    // 이동 속도
+    _camCtrl->setLookSpeed(-180.0f);      // 회전 속도
 
-    // 씬 조명: 나침반 화살표 등 PhongMaterial 오브젝트가 보이도록
+    // 방향성 조명: 태양광처럼 평행하게 내리쬐는 빛 (이걸없앨까말까고민중)
     auto* lightEntity = new Qt3DCore::QEntity(_rootEntity);
     auto* light = new Qt3DRender::QDirectionalLight(lightEntity);
-    light->setWorldDirection(QVector3D(-0.3f, -1.0f, -0.5f));
+    light->setWorldDirection(QVector3D(-0.3f, -1.0f, -0.5f)); // 빛이 오는 방향 (왼쪽 위 앞에서)
     light->setColor(Qt::white);
     light->setIntensity(1.5f);
     lightEntity->addComponent(light);
 
-    // ── 컨트롤 바 ────────────────────────────────
+    // 하단 상태 표시줄
     _statusLabel = new QLabel("Load Terrain 버튼으로 지형 로드", this);
     _statusLabel->setStyleSheet("color: #aaa; font-size: 12px; padding: 2px;");
 
+    // 줌 선택 스핀박스: 10~14 (나중에 줌18까지 해볼예정)
     _zoomSpin = new QSpinBox(this);
-    _zoomSpin->setRange(1, 10);   // ESRI Ocean Base 최대 줌 10 (= 10.9)
-    _zoomSpin->setValue(10);
+    _zoomSpin->setRange(13, 18);
+    _zoomSpin->setValue(17);
 
+    // Load Terrain 버튼: 클릭 시 onFetchClicked 슬롯 호출
     _fetchBtn = new QPushButton("Load Terrain", this);
     connect(_fetchBtn, &QPushButton::clicked, this, &TerrainWidget::onFetchClicked);
+    // 네트워크 응답이 오면 onReplyFinished 슬롯 호출
     connect(&_nam, &QNetworkAccessManager::finished, this, &TerrainWidget::onReplyFinished);
 
+    // 하단 컨트롤 바: [Zoom: 스핀] [Load Terrain 버튼] ----[상태 레이블]
     QHBoxLayout* ctrlBar = new QHBoxLayout();
     ctrlBar->addWidget(new QLabel("Zoom:", this));
     ctrlBar->addWidget(_zoomSpin);
     ctrlBar->addWidget(_fetchBtn);
-    ctrlBar->addStretch();
+    ctrlBar->addStretch();       // 버튼과 상태레이블 사이 빈 공간
     ctrlBar->addWidget(_statusLabel);
 
+    // 전체 레이아웃: 3D 뷰포트(위 _viewport) + 컨트롤 바(아래 ctrlBar)
     QVBoxLayout* layout = new QVBoxLayout(this);
-    layout->setContentsMargins(0, 0, 0, 0);
-    layout->setSpacing(0);
+    layout->setContentsMargins(0, 0, 0, 0); // 외부 여백 없음
+    layout->setSpacing(0);                  // 위젯 간 간격 없음
     layout->addWidget(_viewport);
     layout->addLayout(ctrlBar);
     setLayout(layout);
 }
 
-// ─────────────────────────────────────────────
-// 공개 API
-// ─────────────────────────────────────────────
+// =============================================================
+// 탭 전환 이벤트: 다른 탭에서 마우스 조작이 카메라에 영향 주는 것 방지 (나중에 하나의 창에서는 또 달라짐 나중에 수정해야할 부분)
+// =============================================================
+
+// 이 탭이 보일 때 → 카메라 컨트롤 활성화
+void TerrainWidget::showEvent(QShowEvent* e)
+{
+    QWidget::showEvent(e);
+    if (_camCtrl) _camCtrl->setEnabled(true);
+}
+
+// 이 탭이 숨겨질 때 → 카메라 컨트롤 비활성화
+void TerrainWidget::hideEvent(QHideEvent* e)
+{
+    QWidget::hideEvent(e);
+    if (_camCtrl) _camCtrl->setEnabled(false);
+}
+
+// =============================================================
+// 공개 API: 외부(MainWindow)에서 호출
+// =============================================================
+
+// 탭 전환 시 MainWindow가 호출 → 위경도·줌 저장 후 타일 요청 시작
 void TerrainWidget::loadTile(double lat, double lon, int zoom)
 {
     _lat  = lat;
@@ -133,184 +185,268 @@ void TerrainWidget::loadTile(double lat, double lon, int zoom)
     onFetchClicked();
 }
 
+// MAVLink GPS 수신 시 MainWindow가 호출 → 마커 위치 갱신
+// 최초 GPS 수신 시(0,0 → 실제 좌표)에는 맵 전체를 로봇 위치 기준으로 새로고침
 void TerrainWidget::updateVehiclePosition(double lat, double lon)
 {
+    bool firstFix = (_vehicleLat == 0.0 && _vehicleLon == 0.0);
     _vehicleLat = lat;
     _vehicleLon = lon;
-    updateVehicleMarker();
+
+    if (firstFix) {
+        loadTile(lat, lon, _zoom); // 최초 GPS 수신 → 로봇 위치 기준 맵 리로드
+    } else {
+        updateVehicleMarker();
+    }
 }
 
-// ─────────────────────────────────────────────
-// Load 버튼 → TileServer HTTP 요청
-// ─────────────────────────────────────────────
+// =============================================================
+// Load 버튼 클릭 → 필요한 OSM 타일 범위 계산 후 HTTP 요청
+// =============================================================
 void TerrainWidget::onFetchClicked()
 {
-    _zoom     = _zoomSpin->value();
-    _pendingZ = _zoom;
-    _pendingX = lonToTileX(_lon, _zoom);
-    _pendingY = latToTileY(_lat, _zoom);
+    _zoom = _zoomSpin->value();
 
-    _statusLabel->setText(QString("Fetching z=%1 x=%2 y=%3...")
-                              .arg(_pendingZ).arg(_pendingX).arg(_pendingY));
-    QNetworkRequest req(TERRAIN_URL.arg(_pendingZ).arg(_pendingX).arg(_pendingY));
-    req.setHeader(QNetworkRequest::UserAgentHeader, "HolyUUV_GCS/1.0");
-    _nam.get(req);
-    _fetchBtn->setEnabled(false);
-}
+    // 1픽셀 = 몇 미터인지 계산 후, 1km(500m×2) = 몇 픽셀인지 구함
+    double mpp    = metersPerPixel(_lat, _zoom);
+    int    halfPx = std::max(2, static_cast<int>(std::ceil(500.0 / mpp)));
 
-// ─────────────────────────────────────────────
-// HTTP 응답 → 디코딩 → 메시 빌드
-// ─────────────────────────────────────────────
-void TerrainWidget::onReplyFinished(QNetworkReply* reply)
-{
-    reply->deleteLater();
-    _fetchBtn->setEnabled(true);
+    // 중심 위경도 → 글로벌 픽셀 좌표 변환
+    // fracX: 전체 지도를 1로 봤을 때 경도 위치 (0~1)
+    double fracX = (_lon + 180.0) / 360.0 * (1 << _zoom);
+    double latR  = _lat * M_PI / 180.0;
+    // fracY: 메르카토르 도법으로 위도 위치 계산
+    double fracY = (1.0 - std::log(std::tan(latR) + 1.0 / std::cos(latR)) / M_PI)
+                   / 2.0 * (1 << _zoom);
+    // 글로벌 픽셀 = fracTile * 256 (타일 1개 = 256픽셀)
+    int gCX = static_cast<int>(fracX * 256);
+    int gCY = static_cast<int>(fracY * 256);
 
-    if (reply->error() != QNetworkReply::NoError) {
-        _statusLabel->setText("Error: " + reply->errorString());
-        return;
-    }
+    // 3km 범위를 커버하는 타일 인덱스 범위 계산 (타일이 픽셀보다 256배 크니까 256으로 나눔)
+    _osmTX0 = (gCX - halfPx) / 256;  // 좌상단 타일 X
+    _osmTY0 = (gCY - halfPx) / 256;  // 좌상단 타일 Y
+    int tx1 = (gCX + halfPx) / 256;  // 우하단 타일 X
+    int ty1 = (gCY + halfPx) / 256;  // 우하단 타일 Y
+    _osmTNX = tx1 - _osmTX0 + 1;     // 가로 타일 개수
+    _osmTNY = ty1 - _osmTY0 + 1;     // 세로 타일 개수
 
-    TerrainTile tile = TerrainTile::decodeGebco(_pendingZ, _pendingX, _pendingY, reply->readAll());
-    if (!tile.isValid()) {
-        _statusLabel->setText("PNG 디코딩 실패");
-        return;
-    }
+    // 스티칭 이미지(타일들 합친 것) 안에서 중심 픽셀 위치
+    _stitchCX  = gCX - _osmTX0 * 256;
+    _stitchCY  = gCY - _osmTY0 * 256;
+    _subHalfPx = halfPx;  // 중심에서 ±halfPx = 3km 반경
 
-    _currentTile = tile;
+    _osmImages.clear();
+    _osmPending = _osmTNX * _osmTNY; // 수신 대기 중인 타일 수
 
-    // ── 1km×1km 서브영역 계산 ─────────────────────────
-    // zoom 10, lat 35° → ~125m/pixel → 1km = ±4픽셀
-    double mpp    = metersPerPixel(_lat, tile.tileZ);
-    int    halfPx = std::max(2, static_cast<int>(std::ceil(1500.0 / mpp)));
+    _statusLabel->setText(QString("OSM z=%1 로딩 중... (%2×%3 타일)")
+                              .arg(_zoom).arg(_osmTNX).arg(_osmTNY));
+    _fetchBtn->setEnabled(false); // 로딩 중 중복 요청 방지
 
-    // 로봇 위치 기반 중심 (타일 내 없으면 타일 중심)
-    int cCol = tile.width  / 2;
-    int cRow = tile.height / 2;
-    if (_vehicleLat != 0.0 || _vehicleLon != 0.0) {
-        const int n = 1 << tile.tileZ;
-        double lonW  = static_cast<double>(tile.tileX)     / n * 360.0 - 180.0;
-        double lonE  = static_cast<double>(tile.tileX + 1) / n * 360.0 - 180.0;
-        double latN  = tileYToLat(tile.tileY,     n);
-        double latS  = tileYToLat(tile.tileY + 1, n);
-        double relX  = (_vehicleLon - lonW) / (lonE - lonW);
-        double relY  = (latN - _vehicleLat) / (latN - latS);
-        if (relX >= 0.0 && relX <= 1.0 && relY >= 0.0 && relY <= 1.0) {
-            cCol = static_cast<int>(relX * (tile.width  - 1));
-            cRow = static_cast<int>(relY * (tile.height - 1));
+    // 범위 내 모든 타일 HTTP 요청
+    // 응답은 비동기로 오고 각각 onReplyFinished 에서 처리
+    for (int r = 0; r < _osmTNY; ++r) {
+        for (int c = 0; c < _osmTNX; ++c) {
+            int otx = _osmTX0 + c, oty = _osmTY0 + r;
+            auto* rep = _nam.get(QNetworkRequest(
+                QUrl(OSM_URL.arg(_zoom).arg(otx).arg(oty))));
+            // 응답이 왔을 때 어느 타일인지 알 수 있도록 좌표를 메타데이터로 첨부
+            rep->setProperty("osmTX", otx);
+            rep->setProperty("osmTY", oty);
         }
     }
-    // 경계 클램프: 서브영역이 타일 밖으로 나가지 않도록
-    cCol = std::max(halfPx, std::min(tile.width  - 1 - halfPx, cCol));
-    cRow = std::max(halfPx, std::min(tile.height - 1 - halfPx, cRow));
-
-    _meshCenterCol = cCol;
-    _meshCenterRow = cRow;
-    _meshHalfPx    = halfPx;
-
-    _statusLabel->setText(QString("z=%1  수심 %2m ~ %3m  1km영역 중심(%4,%5) ±%6px")
-                              .arg(tile.tileZ)
-                              .arg(tile.minHeight(), 0, 'f', 0)
-                              .arg(tile.maxHeight(), 0, 'f', 0)
-                              .arg(cCol).arg(cRow).arg(halfPx));
-
-    buildMesh(tile, cCol, cRow, halfPx);
-    buildWaterPlane();
-    buildCompass(tile, cCol, cRow, halfPx);
-    updateVehicleMarker();
 }
 
-// ─────────────────────────────────────────────
-// 높이맵 서브영역 → Qt3D 삼각형 메시
-// cCol/cRow: 타일 내 중심 픽셀, halfPx: ±픽셀 반경 (= 1km / mpp)
-// 항상 _worldHalfSize×2 유닛 크기로 스케일업하여 렌더링
-// ─────────────────────────────────────────────
-void TerrainWidget::buildMesh(const TerrainTile& tile, int cCol, int cRow, int halfPx)
+// =============================================================
+// HTTP 응답 처리
+// =============================================================
+
+// QNetworkAccessManager::finished 시그널 → 이 슬롯 호출
+void TerrainWidget::onReplyFinished(QNetworkReply* reply)
 {
+    reply->deleteLater(); // Qt가 나중에 메모리 자동 해제
+    handleOsmTile(reply);
+}
+
+void TerrainWidget::handleOsmTile(QNetworkReply* reply)
+{
+    // 요청 시 첨부한 타일 좌표 꺼내기
+    int otx = reply->property("osmTX").toInt();
+    int oty = reply->property("osmTY").toInt();
+
+    if (reply->error() == QNetworkReply::NoError) {
+        QImage img;
+        // 응답 바이트 → QImage로 디코딩, 256×256 RGB로 통일
+        if (img.loadFromData(reply->readAll()) && !img.isNull())
+            _osmImages[qMakePair(otx, oty)] =
+                img.scaled(256, 256).convertToFormat(QImage::Format_RGB32);
+    } else {
+        qWarning("OSM tile (%d,%d) error: %s", otx, oty,
+                 qPrintable(reply->errorString()));
+    }
+
+    // 모든 타일 수신 완료 시 스티칭+빌드 진행
+    if (--_osmPending <= 0)
+        stitchAndBuild();
+}
+
+// =============================================================
+// OSM 타일 스티칭 → 바다/육지 판별 → 메시·컴퍼스·마커 빌드 (이거 gebco로 수정해야함 현재 osm에는 하늘식 이런거 없음)
+// =============================================================
+void TerrainWidget::stitchAndBuild()
+{
+    // ── 타일 이미지들을 하나의 큰 이미지로 합치기 ──────────────
+    // 전체 스티칭 이미지 크기: (타일 가로 수 × 256) × (타일 세로 수 × 256)
+    QImage stitched(_osmTNX * 256, _osmTNY * 256, QImage::Format_RGB32);
+    stitched.fill(Qt::black); // 수신 실패한 타일은 검정으로
+    QPainter p(&stitched);
+    for (int r = 0; r < _osmTNY; ++r)
+        for (int c = 0; c < _osmTNX; ++c) {
+            auto key = qMakePair(_osmTX0 + c, _osmTY0 + r);
+            if (_osmImages.contains(key))
+                p.drawImage(c * 256, r * 256, _osmImages[key]); // (c*256, r*256) 위치에 타일 그리기
+        }
+    p.end();
+
+    // ── 스티칭 이미지에서 중심 기준 3km 서브영역 잘라내기 ─────
+    // subW × subH = 실제 메시 해상도 (픽셀 단위)
+    const int   subW      = _subHalfPx * 2 + 1;
+    const int   subH      = _subHalfPx * 2 + 1;
+    const float SEA_DEPTH = -50.0f;  // 바다 높이값 (m)
+    const float LAND_H    = 1.0f;    // 육지 높이값 (m)
+
+    // _currentTile에 높이 배열 세팅
+    _currentTile.tileZ  = _zoom;
+    _currentTile.tileX  = _osmTX0;
+    _currentTile.tileY  = _osmTY0;
+    _currentTile.width  = subW;
+    _currentTile.height = subH;
+    _currentTile.heights.resize(subW * subH);
+
+    // 서브영역 픽셀마다 색을 읽어 바다/육지 판별
+    for (int sy = 0; sy < subH; ++sy) {
+        for (int sx = 0; sx < subW; ++sx) {
+            // 서브영역 픽셀 → 스티칭 이미지 픽셀 좌표 변환 (범위 초과 방지)
+            int px = qBound(0, _stitchCX - _subHalfPx + sx, stitched.width()  - 1);
+            int py = qBound(0, _stitchCY - _subHalfPx + sy, stitched.height() - 1);
+            QRgb  col = stitched.pixel(px, py);
+            int   r = qRed(col), g = qGreen(col), b = qBlue(col);
+            // CartoDB Positron 수색 판별: #AAD3DF 계열 → 파란 성분이 확실히 우세
+            bool  water = (b > r + 15) && (b > 150) && (g > 150);
+            _currentTile.heights[sy * subW + sx] = water ? SEA_DEPTH : LAND_H;
+        }
+    }
+
+    // ── 스티칭 이미지를 임시 파일로 저장 (Qt3D 텍스처 로드용) ──
+    // seq로 매번 다른 파일명 생성 → 이전 텍스처와 충돌 방지
+    static int seq = 0;
+    _osmTexPath = QString("%1/holyuuv_osm_%2.png").arg(QDir::tempPath()).arg(++seq);
+    stitched.save(_osmTexPath);
+
+    buildMesh();              // 높이맵 + 텍스처로 3D 메시 생성
+    updateVehicleMarker();    // 로봇 위치 마커 갱신
+    resetCameraToTerrain();   // 로드 완료 후 초기 카메라 시점 설정
+
+    _fetchBtn->setEnabled(true);
+    _statusLabel->setText(
+        QString("OSM z=%1  lat=%2 lon=%3  %4×%5px  ~%6m/px")
+            .arg(_zoom)
+            .arg(_lat, 0, 'f', 5)
+            .arg(_lon, 0, 'f', 5)
+            .arg(subW).arg(subH)
+            .arg(metersPerPixel(_lat, _zoom), 0, 'f', 1));
+}
+
+// =============================================================
+// 높이맵 → Qt3D 메시 생성
+// 정점 포맷: position(3) + normal(3) + uv(2) = float 8개/정점
+// =============================================================
+void TerrainWidget::buildMesh()
+{
+    // 기존 메시 엔티티가 있으면 씬에서 제거 후 삭제
+    // setParent(nullptr)로 씬 트리에서 분리해야 Qt3D가 안전하게 삭제 가능
     if (_meshEntity) {
         _meshEntity->setParent(static_cast<Qt3DCore::QNode*>(nullptr));
         delete _meshEntity;
         _meshEntity = nullptr;
     }
 
-    const int   subW        = halfPx * 2 + 1;
-    const int   subH        = halfPx * 2 + 1;
-    const float scale       = _worldHalfSize / static_cast<float>(halfPx);
+    const TerrainTile& tile = _currentTile;
+    const int   subW        = tile.width;
+    const int   subH        = tile.height;
+    // scale: 픽셀 좌표 → 3D 월드 좌표 변환 비율
+    // _worldHalfSize=128 이므로 메시는 항상 -128~+128 범위 안에 들어옴
+    const float scale       = _worldHalfSize / static_cast<float>(_subHalfPx);
+    // heightScale: 높이값(m)을 3D 좌표로 변환 (너무 작으면 평평해 보임)
     const float heightScale = 0.05f;
 
-    float minH = tile.minHeight();
-    float maxH = tile.maxHeight();
+    // UV 좌표 계산을 위한 기준값
+    // 텍스처는 스티칭 이미지 전체, 서브영역은 그 안의 일부분
+    const float texW  = static_cast<float>(_osmTNX * 256); // 스티칭 이미지 전체 가로 픽셀
+    const float texH  = static_cast<float>(_osmTNY * 256); // 스티칭 이미지 전체 세로 픽셀
+    const int   imgX0 = _stitchCX - _subHalfPx;            // 서브영역 좌상단 X (스티칭 기준)
+    const int   imgY0 = _stitchCY - _subHalfPx;            // 서브영역 좌상단 Y (스티칭 기준)
 
-    // ── 버텍스: position(3) + normal(3) + color(3) ──
-    QByteArray vertexBytes(subW * subH * 9 * sizeof(float), Qt::Uninitialized);
-    float* vp = reinterpret_cast<float*>(vertexBytes.data());
+    // 정점 버퍼 메모리 할당: 정점 수 × 8개 float
+    QByteArray vertexBytes(subW * subH * 8 * sizeof(float), Qt::Uninitialized);
+    float* vp = reinterpret_cast<float*>(vertexBytes.data()); // float 포인터로 접근
 
-    for (int sr = 0; sr < subH; ++sr) {
-        for (int sc = 0; sc < subW; ++sc) {
-            float h = tile.heightAt(cCol - halfPx + sc, cRow - halfPx + sr);
+    // 모든 정점 데이터 채우기
+    for (int sr = 0; sr < subH; ++sr) {       // sr = row (Z축 방향, 북→남)
+        for (int sc = 0; sc < subW; ++sc) {   // sc = col (X축 방향, 서→동)
+            float h = tile.heightAt(sc, sr);  // heights 배열에서 높이값 읽기
 
-            float xPos = (sc - halfPx) * scale;
-            float zPos = (sr - halfPx) * scale;
-            float yPos = h * heightScale;
-
-            *vp++ = xPos; *vp++ = yPos; *vp++ = zPos;
-            *vp++ = 0.0f; *vp++ = 1.0f; *vp++ = 0.0f;
-
-            float r, g, b;
-            if (h < 0.0f) {
-                float depth = (-h) / (-minH + 1.0f);
-                r = 0.0f;
-                g = 0.2f * (1.0f - depth);
-                b = 0.4f + 0.6f * (1.0f - depth);
-            } else {
-                float t = h / (maxH + 1.0f);
-                r = 0.05f + t * 0.15f;
-                g = 0.6f  - t * 0.25f;
-                b = 0.05f + t * 0.05f;
-            }
-            *vp++ = r; *vp++ = g; *vp++ = b;
+            *vp++ = (sc - _subHalfPx) * scale;          // X: 서←중심→동
+            *vp++ = h * heightScale;                     // Y: 높이 (위쪽이 양수)
+            *vp++ = (sr - _subHalfPx) * scale;          // Z: 북←중심→남
+            *vp++ = 0.0f; *vp++ = 1.0f; *vp++ = 0.0f;  // 노말: 위쪽(0,1,0) 고정
+            *vp++ = (imgX0 + sc) / texW;                 // U: 텍스처 가로 좌표 (0~1)
+            *vp++ = (imgY0 + sr) / texH;                 // V: 텍스처 세로 좌표 (0~1)
         }
     }
 
-    // ── 인덱스 ──
+    // 인덱스 버퍼: 정점들을 삼각형 2개(사각형 1개)씩 연결
+    // (subW-1) × (subH-1) 개의 사각형 × 삼각형 2개 × 정점 3개
     const int quadCount = (subW - 1) * (subH - 1);
     QByteArray indexBytes(quadCount * 6 * sizeof(uint32_t), Qt::Uninitialized);
     uint32_t* ip = reinterpret_cast<uint32_t*>(indexBytes.data());
-
     for (int sr = 0; sr < subH - 1; ++sr) {
         for (int sc = 0; sc < subW - 1; ++sc) {
-            uint32_t tl = static_cast<uint32_t>(sr * subW + sc);
-            uint32_t tr = tl + 1;
-            uint32_t bl = tl + static_cast<uint32_t>(subW);
-            uint32_t br = bl + 1;
+            // 사각형 4개 꼭짓점 인덱스
+            uint32_t tl = static_cast<uint32_t>(sr * subW + sc);       // 좌상단
+            uint32_t tr = tl + 1;                                       // 우상단
+            uint32_t bl = tl + static_cast<uint32_t>(subW);            // 좌하단
+            uint32_t br = bl + 1;                                       // 우하단
+            // 삼각형 1: 좌상단→좌하단→우상단
             *ip++ = tl; *ip++ = bl; *ip++ = tr;
+            // 삼각형 2: 우상단→좌하단→우하단
             *ip++ = tr; *ip++ = bl; *ip++ = br;
         }
     }
 
-    // ── Qt3D 지오메트리 조립 ──
+    // GPU 버퍼 생성
     auto* geometry = new Qt3DRender::QGeometry();
-
     auto* vBuf = new Qt3DRender::QBuffer(geometry);
-    vBuf->setData(vertexBytes);
+    vBuf->setData(vertexBytes); // 정점 데이터 GPU에 업로드
     auto* iBuf = new Qt3DRender::QBuffer(geometry);
-    iBuf->setData(indexBytes);
+    iBuf->setData(indexBytes);  // 인덱스 데이터 GPU에 업로드
 
-    auto makeAttr = [&](const QString& name, int offset, int size) {
+    // 정점 속성 등록 헬퍼: 하나의 버퍼 안에서 offset·stride로 각 속성 위치 지정
+    auto addAttr = [&](const QString& name, int offset, int size) {
         auto* a = new Qt3DRender::QAttribute(geometry);
         a->setName(name);
         a->setVertexBaseType(Qt3DRender::QAttribute::Float);
-        a->setVertexSize(size);
-        a->setByteOffset(offset * sizeof(float));
-        a->setByteStride(9 * sizeof(float));
-        a->setCount(static_cast<uint>(subW * subH));
+        a->setVertexSize(size);                      // 이 속성이 float 몇 개인지
+        a->setByteOffset(offset * sizeof(float));    // 정점 시작에서 몇 바이트 뒤
+        a->setByteStride(8 * sizeof(float));         // 다음 정점까지 몇 바이트
+        a->setCount(static_cast<uint>(subW * subH)); // 전체 정점 수
         a->setBuffer(vBuf);
         geometry->addAttribute(a);
     };
-    makeAttr(Qt3DRender::QAttribute::defaultPositionAttributeName(), 0, 3);
-    makeAttr(Qt3DRender::QAttribute::defaultNormalAttributeName(),   3, 3);
-    makeAttr(Qt3DRender::QAttribute::defaultColorAttributeName(),    6, 3);
+    addAttr(Qt3DRender::QAttribute::defaultPositionAttributeName(),          0, 3); // 위치 (offset=0, 3floats)
+    addAttr(Qt3DRender::QAttribute::defaultNormalAttributeName(),            3, 3); // 노말 (offset=3, 3floats)
+    addAttr(Qt3DRender::QAttribute::defaultTextureCoordinateAttributeName(), 6, 2); // UV   (offset=6, 2floats)
 
+    // 인덱스 속성 등록
     auto* idxAttr = new Qt3DRender::QAttribute(geometry);
     idxAttr->setAttributeType(Qt3DRender::QAttribute::IndexAttribute);
     idxAttr->setVertexBaseType(Qt3DRender::QAttribute::UnsignedInt);
@@ -318,176 +454,94 @@ void TerrainWidget::buildMesh(const TerrainTile& tile, int cCol, int cRow, int h
     idxAttr->setBuffer(iBuf);
     geometry->addAttribute(idxAttr);
 
+    // 지오메트리 렌더러: 어떤 방식으로 그릴지 (Triangles = 인덱스 3개마다 삼각형 1개)
     auto* renderer = new Qt3DRender::QGeometryRenderer();
     renderer->setGeometry(geometry);
     renderer->setPrimitiveType(Qt3DRender::QGeometryRenderer::Triangles);
 
-    auto* material = new Qt3DExtras::QPerVertexColorMaterial(_rootEntity);
+    // OSM 텍스처 로드
+    auto* tex = new Qt3DRender::QTexture2D(_rootEntity);
+    tex->setMinificationFilter(Qt3DRender::QAbstractTexture::Linear);  // 축소 시 부드럽게
+    tex->setMagnificationFilter(Qt3DRender::QAbstractTexture::Linear); // 확대 시 부드럽게
+    auto* texImg = new Qt3DRender::QTextureImage(tex);
+    texImg->setSource(QUrl::fromLocalFile(_osmTexPath)); // 임시 파일에서 로드
+    texImg->setMirrored(false); // OpenGL 기본값은 Y축 뒤집힘 → false로 꺼야 북쪽이 위로
+    tex->addTextureImage(texImg);
 
+    // 재질: 텍스처 맵 + 주변광/반사광
+    auto* mat = new Qt3DExtras::QDiffuseMapMaterial(_rootEntity);
+    mat->setDiffuse(tex);                   // OSM 이미지를 텍스처로
+    mat->setAmbient(QColor(180, 180, 180)); // 그늘진 부분도 너무 어둡지 않게
+    mat->setSpecular(QColor(20, 20, 20));   // 반사광은 거의 없게
+    mat->setShininess(5.0f);               // 낮을수록 무광
+
+    // 엔티티에 렌더러와 재질 붙이기
     _meshEntity = new Qt3DCore::QEntity(_rootEntity);
     _meshEntity->addComponent(renderer);
-    _meshEntity->addComponent(material);
+    _meshEntity->addComponent(mat);
 }
 
-// ─────────────────────────────────────────────
-// 해수면 평면 생성
-// 3m 기준(SEA_LEVEL_OFFSET * heightScale)에 반투명 파란 평면을 깔아서
-// 육지가 평면 위로 솟아오르고 바다는 평면 아래로 가라앉아 해안선이 명확해짐
-// ─────────────────────────────────────────────
-void TerrainWidget::buildWaterPlane()
-{
-    if (_waterPlane) {
-        _waterPlane->setParent(static_cast<Qt3DCore::QNode*>(nullptr));
-        delete _waterPlane;
-        _waterPlane = nullptr;
-    }
 
-    _waterPlane = new Qt3DCore::QEntity(_rootEntity);
-
-    auto* mesh = new Qt3DExtras::QPlaneMesh(_waterPlane);
-    mesh->setWidth(_worldHalfSize * 2.0f);
-    mesh->setHeight(_worldHalfSize * 2.0f);
-    mesh->setMeshResolution(QSize(2, 2));
-
-    // 반투명 파란 수면
-    auto* mat = new Qt3DExtras::QPhongAlphaMaterial(_waterPlane);
-    mat->setAmbient(QColor(0,  60, 120));
-    mat->setDiffuse(QColor(0,  90, 180));
-    mat->setSpecular(QColor(100, 180, 255));
-    mat->setShininess(80.0f);
-    mat->setAlpha(0.55f);  // 0=완전투명, 1=불투명 — 0.55면 아래 지형 살짝 보임
-
-    auto* t = new Qt3DCore::QTransform();
-    t->setTranslation(QVector3D(0.0f, 0.0f, 0.0f));
-
-    _waterPlane->addComponent(mesh);
-    _waterPlane->addComponent(mat);
-    _waterPlane->addComponent(t);
-}
-
-// ─────────────────────────────────────────────
-// 나침반 + 4개 모서리 좌표 레이블 생성
-// 검증: 각 모서리에 실제 위경도를 표시하여 2D 지도와 대조 가능
-// ─────────────────────────────────────────────
-void TerrainWidget::buildCompass(const TerrainTile& tile, int cCol, int cRow, int halfPx)
-{
-    if (_compassEntity) {
-        _compassEntity->setParent(static_cast<Qt3DCore::QNode*>(nullptr));
-        delete _compassEntity;
-        _compassEntity = nullptr;
-    }
-
-    _compassEntity = new Qt3DCore::QEntity(_rootEntity);
-
-    const float hw     = _worldHalfSize;
-    const float margin = hw + 18.0f;
-    const float yText  = 5.0f;
-
-    // ── 서브영역 4모서리의 실제 위경도 계산 ──────────
-    const int    n    = 1 << tile.tileZ;
-    const double lonW = static_cast<double>(tile.tileX)     / n * 360.0 - 180.0;
-    const double lonE = static_cast<double>(tile.tileX + 1) / n * 360.0 - 180.0;
-    const double latN = tileYToLat(tile.tileY,     n);
-    const double latS = tileYToLat(tile.tileY + 1, n);
-
-    double subLonW = lonW + (double)(cCol - halfPx) / tile.width  * (lonE - lonW);
-    double subLonE = lonW + (double)(cCol + halfPx) / tile.width  * (lonE - lonW);
-    double subLatN = latN + (double)(cRow - halfPx) / tile.height * (latS - latN);
-    double subLatS = latN + (double)(cRow + halfPx) / tile.height * (latS - latN);
-
-    auto addLabel = [&](const QString& text, float x, float y, float z3d,
-                        float rotY, float w, const QColor& color)
-    {
-        auto* label = new Qt3DExtras::QText2DEntity(_compassEntity);
-        label->setText(text);
-        label->setFont(QFont("Arial", 8, QFont::Bold));
-        label->setColor(color);
-        label->setWidth(w);
-        label->setHeight(14.0f);
-        auto* t = new Qt3DCore::QTransform();
-        t->setTranslation(QVector3D(x, y, z3d));
-        t->setRotationY(rotY);
-        label->addComponent(t);
-    };
-
-    addLabel("N", -7.0f,       yText, -margin,        0.0f, 14.0f, QColor(255, 80,  80));
-    addLabel("S", -7.0f,       yText,  margin,       180.0f, 14.0f, QColor(200, 200, 200));
-    addLabel("E",  margin,     yText, -7.0f,          -90.0f, 14.0f, QColor(200, 200, 200));
-    addLabel("W", -margin-14,  yText, -7.0f,           90.0f, 14.0f, QColor(200, 200, 200));
-
-    // 4모서리 실제 위경도 (서브영역 기준)
-    addLabel(QString("%1°N\n%2°E").arg(subLatN,0,'f',4).arg(subLonW,0,'f',4),
-             -hw-80, yText+10, -hw, 0.0f, 80.0f, QColor(255, 220, 100));
-    addLabel(QString("%1°N\n%2°E").arg(subLatN,0,'f',4).arg(subLonE,0,'f',4),
-              hw+5,  yText+10, -hw, 0.0f, 80.0f, QColor(255, 220, 100));
-    addLabel(QString("%1°N\n%2°E").arg(subLatS,0,'f',4).arg(subLonW,0,'f',4),
-             -hw-80, yText+10,  hw, 0.0f, 80.0f, QColor(180, 255, 180));
-    addLabel(QString("%1°N\n%2°E").arg(subLatS,0,'f',4).arg(subLonE,0,'f',4),
-              hw+5,  yText+10,  hw, 0.0f, 80.0f, QColor(180, 255, 180));
-}
-
-// ─────────────────────────────────────────────
-// 차량 마커: 현재 위경도를 타일 내 3D 좌표로 변환
-// ─────────────────────────────────────────────
+// =============================================================
+// 차량 마커: 위경도 → 3D 좌표로 변환 후 빨간 구체 배치
+// =============================================================
 void TerrainWidget::updateVehicleMarker()
 {
-    if (!_currentTile.isValid() || (_vehicleLat == 0.0 && _vehicleLon == 0.0)) return;
+    // 위경도가 아직 없거나 지형 데이터가 없으면 스킵
+    if (_vehicleLat == 0.0 && _vehicleLon == 0.0) return;
+    if (!_currentTile.isValid()) return;
 
-    // 마커 제거 후 재생성
+    // 기존 마커 제거
     if (_vehicleMarker) {
         _vehicleMarker->setParent(static_cast<Qt3DCore::QNode*>(nullptr));
         delete _vehicleMarker;
         _vehicleMarker = nullptr;
     }
 
-    // 타일 내 픽셀 위치 계산 (정규화 0~1)
-    // 타일 하나의 위도/경도 범위 계산
-    const int z = _currentTile.tileZ;
-    const int tx = _currentTile.tileX;
-    const int ty = _currentTile.tileY;
-    const int n = 1 << z;
+    // 차량 위경도 → 글로벌 픽셀 좌표 (onFetchClicked와 동일한 변환)
+    double fracX = (_vehicleLon + 180.0) / 360.0 * (1 << _zoom);
+    double latR  = _vehicleLat * M_PI / 180.0;
+    double fracY = (1.0 - std::log(std::tan(latR) + 1.0 / std::cos(latR)) / M_PI)
+                   / 2.0 * (1 << _zoom);
+    double gVX = fracX * 256; // 차량 글로벌 픽셀 X
+    double gVY = fracY * 256; // 차량 글로벌 픽셀 Y
 
-    // 타일의 서쪽/동쪽 경도
-    double lonWest  = static_cast<double>(tx)     / n * 360.0 - 180.0;
-    double lonEast  = static_cast<double>(tx + 1) / n * 360.0 - 180.0;
+    // 글로벌 픽셀 → 스티칭 이미지 내 좌표
+    double sVX = gVX - _osmTX0 * 256;
+    double sVY = gVY - _osmTY0 * 256;
 
-    // 타일의 북쪽/남쪽 위도 (Web Mercator 역변환)
-    double latNorth = tileYToLat(ty,     n);
-    double latSouth = tileYToLat(ty + 1, n);
+    // 스티칭 이미지 내 좌표 → 서브영역 중심 기준 오프셋
+    double relX = sVX - _stitchCX; // 중심에서 동쪽으로 몇 픽셀
+    double relY = sVY - _stitchCY; // 중심에서 남쪽으로 몇 픽셀
 
-    // 타일 내 상대 위치 (0~1)
-    double relX = (_vehicleLon - lonWest)  / (lonEast  - lonWest);
-    double relY = (latNorth - _vehicleLat) / (latNorth - latSouth);  // row 방향 (위→아래=북→남)
+    // 서브영역 밖이면 마커 표시 안 함
+    if (std::abs(relX) > _subHalfPx || std::abs(relY) > _subHalfPx) return;
 
-    // 타일 범위 벗어나면 마커 표시 안 함
-    if (relX < 0.0 || relX > 1.0 || relY < 0.0 || relY > 1.0) return;
-
-    const float W = static_cast<float>(_currentTile.width);
-    const float H = static_cast<float>(_currentTile.height);
-    const float scale       = _worldHalfSize / static_cast<float>(_meshHalfPx);
+    const float scale       = _worldHalfSize / static_cast<float>(_subHalfPx);
     const float heightScale = 0.05f;
 
-    int col = static_cast<int>(relX * (W - 1));
-    int row = static_cast<int>(relY * (H - 1));
+    // 픽셀 오프셋 → 배열 인덱스로 변환해서 해당 위치 높이값 읽기
+    int sc = static_cast<int>(relX + _subHalfPx);
+    int sr = static_cast<int>(relY + _subHalfPx);
+    float h = _currentTile.heightAt(sc, sr);
 
-    // 서브영역 중심(_meshCenterCol, _meshCenterRow) 기준 좌표 변환
-    float xPos = (col - _meshCenterCol) * scale;
-    float zPos = (row - _meshCenterRow) * scale;
-    float yPos = _currentTile.heightAt(col, row) * heightScale + 8.0f;
+    // 픽셀 오프셋 → 3D 월드 좌표
+    float xPos = static_cast<float>(relX) * scale;
+    float zPos = static_cast<float>(relY) * scale;
+    float yPos = h * heightScale + 8.0f; // 지형 위 8유닛 띄워서 묻히지 않게
 
-    // 빨간 구체 마커
+    // 빨간 구체 생성
     _vehicleMarker = new Qt3DCore::QEntity(_rootEntity);
-
     auto* sphere = new Qt3DExtras::QSphereMesh(_vehicleMarker);
     sphere->setRadius(5.0f);
-    sphere->setRings(8);
-    sphere->setSlices(8);
+    sphere->setRings(8);    // 위아래 분할 수 (낮을수록 성능↑)
+    sphere->setSlices(8);   // 좌우 분할 수
 
     auto* mat = new Qt3DExtras::QPhongMaterial(_vehicleMarker);
-    mat->setAmbient(QColor(200, 20,  20));
-    mat->setDiffuse(QColor(255, 60,  60));
-    mat->setSpecular(QColor(255, 200, 200));
-    mat->setShininess(60.0f);
+    mat->setAmbient(QColor(200, 20, 20));    // 그늘 색
+    mat->setDiffuse(QColor(255, 60, 60));    // 기본 색 (밝은 빨강)
+    mat->setSpecular(QColor(255, 200, 200)); // 반사광 색
+    mat->setShininess(60.0f);               // 반사 강도
 
     auto* t = new Qt3DCore::QTransform();
     t->setTranslation(QVector3D(xPos, yPos, zPos));
@@ -497,24 +551,56 @@ void TerrainWidget::updateVehicleMarker()
     _vehicleMarker->addComponent(t);
 }
 
-// ─────────────────────────────────────────────
-// 위경도 → 타일 인덱스 변환 (Web Mercator)
-// ─────────────────────────────────────────────
-int TerrainWidget::lonToTileX(double lon, int z)
+// =============================================================
+// Load Terrain 완료 후 초기 카메라 시점 설정
+//
+// 우선순위:
+//   1. 로봇 마커가 맵 위에 있음  → 로봇 3D 위치 기준
+//   2. GPS 수신됐지만 맵 밖      → 맵 중심(0,0,0) 기준
+//   3. GPS 없음 (기본값)         → 맵 중심(0,0,0) 기준
+//
+// 카메라 배치:
+//   - 정북향(−Z 방향) 바라봄
+//   - 피치 약 −20° (수평에서 20° 아래)
+//   - 대상 기준 위로 30유닛, 남쪽으로 80유닛 뒤에 위치
+//     → atan(30/80) ≈ 20.6° 피치
+// =============================================================
+void TerrainWidget::resetCameraToTerrain()
 {
-    return static_cast<int>(std::floor((lon + 180.0) / 360.0 * (1 << z)));
-}
+    Qt3DRender::QCamera* cam = _view->camera();
 
-int TerrainWidget::latToTileY(double lat, int z)
-{
-    double latRad = lat * M_PI / 180.0;
-    return static_cast<int>(
-        std::floor((1.0 - std::log(std::tan(latRad) + 1.0 / std::cos(latRad)) / M_PI) / 2.0 * (1 << z)));
-}
+    QVector3D target(0.0f, 0.0f, 0.0f); // 기본값: 맵 중심
 
-// tileY 인덱스 → 위도 역변환 (Web Mercator)
-double TerrainWidget::tileYToLat(int ty, int n)
-{
-    double latRad = std::atan(std::sinh(M_PI * (1.0 - 2.0 * static_cast<double>(ty) / n)));
-    return latRad * 180.0 / M_PI;
+    // 우선순위 1: 로봇 마커가 맵 위에 배치된 경우
+    if (_vehicleMarker && _currentTile.isValid()) {
+        double fracX = (_vehicleLon + 180.0) / 360.0 * (1 << _zoom);
+        double latR  = _vehicleLat * M_PI / 180.0;
+        double fracY = (1.0 - std::log(std::tan(latR) + 1.0 / std::cos(latR)) / M_PI)
+                       / 2.0 * (1 << _zoom);
+        double relX  = (fracX * 256 - _osmTX0 * 256) - _stitchCX;
+        double relY  = (fracY * 256 - _osmTY0 * 256) - _stitchCY;
+
+        const float scale       = _worldHalfSize / static_cast<float>(_subHalfPx);
+        const float heightScale = 0.05f;
+        int sc = static_cast<int>(relX + _subHalfPx);
+        int sr = static_cast<int>(relY + _subHalfPx);
+        float h = _currentTile.heightAt(sc, sr);
+
+        target = QVector3D(static_cast<float>(relX) * scale,
+                           h * heightScale,
+                           static_cast<float>(relY) * scale);
+    }
+    // 우선순위 2, 3: GPS 있든 없든 맵 중심 사용 (target 이미 (0,0,0))
+
+    // 미터 → 월드 유닛 변환: _worldHalfSize(128) = halfRange 미터
+    // halfRange = _subHalfPx * mpp ≈ 500m
+    float mpp          = static_cast<float>(metersPerPixel(_lat, _zoom));
+    float unitsPerMeter = _worldHalfSize / (_subHalfPx * mpp);
+
+    // 카메라: 대상에서 위로 700m, 남쪽(+Z)으로 500m → 정북 바라봄
+    float up    = 700.0f * unitsPerMeter;
+    float south = 500.0f * unitsPerMeter;
+    cam->setPosition(target + QVector3D(0.0f, up, south));
+    cam->setViewCenter(target);
+    cam->setUpVector(QVector3D(0.0f, 1.0f, 0.0f));
 }
