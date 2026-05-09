@@ -90,7 +90,7 @@ void MainWindow::_setupUi()
     // ── Voyager 맵 탭 ───────────────────────────────
     _positronWidget = new QQuickWidget();
     _positronWidget->rootContext()->setContextProperty("bridge", &_mapBridge);
-    _positronWidget->setSource(QUrl("qrc:/qml/PositronView.qml"));
+    _positronWidget->setSource(QUrl("qrc:/qml/VoyagerView.qml"));
     _positronWidget->setResizeMode(QQuickWidget::SizeRootObjectToView);
     tabs->addTab(_positronWidget, "Voyager");
 

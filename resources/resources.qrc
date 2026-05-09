@@ -2,7 +2,7 @@
     <qresource prefix="/">
         <file>USBBoardInfo.json</file>
         <file>qml/MapView.qml</file>
-        <file>qml/PositronView.qml</file>
+        <file>qml/VoyagerView.qml</file>
         <file>qml/GebcoView.qml</file>
     </qresource>
 </RCC>
