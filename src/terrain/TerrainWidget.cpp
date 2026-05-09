@@ -40,9 +40,9 @@
 #include <Qt3DRender/QAttribute>         // 정점 속성 (위치, 노말, UV 등)
 #include <Qt3DRender/QBuffer>            // GPU에 올릴 바이트 버퍼
 
-// OSM 타일 URL 템플릿: %1=zoom, %2=tileX, %3=tileY
-// TileServer(포트 17777)가 로컬에서 OSM 타일을 중계
-static const QString OSM_URL = "http://localhost:17777/osm/%1/%2/%3.png";
+// TileServer(포트 17777)가 로컬에서 타일을 중계
+static const QString OSM_URL      = "http://localhost:17777/osm/%1/%2/%3.png";
+static const QString VOYAGER_URL = "http://localhost:17777/voyager/%1/%2/%3.png";
 
 // =============================================================
 // Web Mercator 좌표 변환 유틸 3개
@@ -136,12 +136,17 @@ TerrainWidget::TerrainWidget(QWidget* parent)
     // 네트워크 응답이 오면 onReplyFinished 슬롯 호출
     connect(&_nam, &QNetworkAccessManager::finished, this, &TerrainWidget::onReplyFinished);
 
-    // 하단 컨트롤 바: [Zoom: 스핀] [Load Terrain 버튼] ----[상태 레이블]
+    // 다크/라이트 모드 토글 버튼
+    _modeBtn = new QPushButton("Light Mode", this);
+    connect(_modeBtn, &QPushButton::clicked, this, &TerrainWidget::onModeToggled);
+
+    // 하단 컨트롤 바: [Zoom: 스핀] [Load Terrain 버튼] [Light Mode 버튼] ----[상태 레이블]
     QHBoxLayout* ctrlBar = new QHBoxLayout();
     ctrlBar->addWidget(new QLabel("Zoom:", this));
     ctrlBar->addWidget(_zoomSpin);
     ctrlBar->addWidget(_fetchBtn);
-    ctrlBar->addStretch();       // 버튼과 상태레이블 사이 빈 공간
+    ctrlBar->addWidget(_modeBtn);
+    ctrlBar->addStretch();
     ctrlBar->addWidget(_statusLabel);
 
     // 전체 레이아웃: 3D 뷰포트(위 _viewport) + 컨트롤 바(아래 ctrlBar)
@@ -236,22 +241,29 @@ void TerrainWidget::onFetchClicked()
     _subHalfPx = halfPx;  // 중심에서 ±halfPx = 3km 반경
 
     _osmImages.clear();
-    _osmPending = _osmTNX * _osmTNY; // 수신 대기 중인 타일 수
+    _osmPending = _osmTNX * _osmTNY;
 
-    _statusLabel->setText(QString("OSM z=%1 로딩 중... (%2×%3 타일)")
+    _voyagerImages.clear();
+    _voyagerPending = _osmTNX * _osmTNY;
+
+    _statusLabel->setText(QString("OSM+Voyager z=%1 로딩 중... (%2×%3 타일)")
                               .arg(_zoom).arg(_osmTNX).arg(_osmTNY));
-    _fetchBtn->setEnabled(false); // 로딩 중 중복 요청 방지
+    _fetchBtn->setEnabled(false);
 
-    // 범위 내 모든 타일 HTTP 요청
-    // 응답은 비동기로 오고 각각 onReplyFinished 에서 처리
+    // dark_all + Voyager 동시 요청
     for (int r = 0; r < _osmTNY; ++r) {
         for (int c = 0; c < _osmTNX; ++c) {
             int otx = _osmTX0 + c, oty = _osmTY0 + r;
-            auto* rep = _nam.get(QNetworkRequest(
+
+            auto* osmRep = _nam.get(QNetworkRequest(
                 QUrl(OSM_URL.arg(_zoom).arg(otx).arg(oty))));
-            // 응답이 왔을 때 어느 타일인지 알 수 있도록 좌표를 메타데이터로 첨부
-            rep->setProperty("osmTX", otx);
-            rep->setProperty("osmTY", oty);
+            osmRep->setProperty("osmTX", otx);
+            osmRep->setProperty("osmTY", oty);
+
+            auto* posRep = _nam.get(QNetworkRequest(
+                QUrl(VOYAGER_URL.arg(_zoom).arg(otx).arg(oty))));
+            posRep->setProperty("positronTX", otx);
+            posRep->setProperty("positronTY", oty);
         }
     }
 }
@@ -260,59 +272,98 @@ void TerrainWidget::onFetchClicked()
 // HTTP 응답 처리
 // =============================================================
 
-// QNetworkAccessManager::finished 시그널 → 이 슬롯 호출
+// QNetworkAccessManager::finished 시그널 → 타입별 핸들러로 라우팅
 void TerrainWidget::onReplyFinished(QNetworkReply* reply)
 {
-    reply->deleteLater(); // Qt가 나중에 메모리 자동 해제
-    handleOsmTile(reply);
+    reply->deleteLater();
+    if (reply->property("positronTX").isValid())
+        handleVoyagerTile(reply);
+    else
+        handleOsmTile(reply);
 }
 
 void TerrainWidget::handleOsmTile(QNetworkReply* reply)
 {
-    // 요청 시 첨부한 타일 좌표 꺼내기
     int otx = reply->property("osmTX").toInt();
     int oty = reply->property("osmTY").toInt();
 
     if (reply->error() == QNetworkReply::NoError) {
         QImage img;
-        // 응답 바이트 → QImage로 디코딩, 256×256 RGB로 통일
-        if (img.loadFromData(reply->readAll()) && !img.isNull())
+        if (img.loadFromData(reply->readAll()) && !img.isNull()) {
             _osmImages[qMakePair(otx, oty)] =
                 img.scaled(256, 256).convertToFormat(QImage::Format_RGB32);
+            qInfo("OSM tile OK (%d,%d) pending=%d", otx, oty, _osmPending - 1);
+        } else {
+            qWarning("OSM tile (%d,%d): 이미지 디코딩 실패", otx, oty);
+        }
     } else {
         qWarning("OSM tile (%d,%d) error: %s", otx, oty,
                  qPrintable(reply->errorString()));
     }
 
-    // 모든 타일 수신 완료 시 스티칭+빌드 진행
-    if (--_osmPending <= 0)
+    if (--_osmPending <= 0 && _voyagerPending <= 0)
+        stitchAndBuild();
+}
+
+void TerrainWidget::handleVoyagerTile(QNetworkReply* reply)
+{
+    int otx = reply->property("positronTX").toInt();
+    int oty = reply->property("positronTY").toInt();
+
+    if (reply->error() == QNetworkReply::NoError) {
+        QImage img;
+        if (img.loadFromData(reply->readAll()) && !img.isNull()) {
+            _voyagerImages[qMakePair(otx, oty)] =
+                img.scaled(256, 256).convertToFormat(QImage::Format_RGB32);
+            qInfo("Voyager tile OK (%d,%d) pending=%d", otx, oty, _voyagerPending - 1);
+        } else {
+            qWarning("Voyager tile (%d,%d): 이미지 디코딩 실패", otx, oty);
+        }
+    } else {
+        qWarning("Voyager tile (%d,%d) error: %s", otx, oty,
+                 qPrintable(reply->errorString()));
+    }
+
+    if (--_voyagerPending <= 0 && _osmPending <= 0)
         stitchAndBuild();
 }
 
 // =============================================================
-// OSM 타일 스티칭 → 바다/육지 판별 → 메시·컴퍼스·마커 빌드 (이거 gebco로 수정해야함 현재 osm에는 하늘식 이런거 없음)
+// OSM+Voyager 타일 스티칭 → Voyager로 수역 마스크 → 메시·마커 빌드
 // =============================================================
 void TerrainWidget::stitchAndBuild()
 {
-    // ── 타일 이미지들을 하나의 큰 이미지로 합치기 ──────────────
-    // 전체 스티칭 이미지 크기: (타일 가로 수 × 256) × (타일 세로 수 × 256)
-    QImage stitched(_osmTNX * 256, _osmTNY * 256, QImage::Format_RGB32);
-    stitched.fill(Qt::black); // 수신 실패한 타일은 검정으로
-    QPainter p(&stitched);
-    for (int r = 0; r < _osmTNY; ++r)
-        for (int c = 0; c < _osmTNX; ++c) {
-            auto key = qMakePair(_osmTX0 + c, _osmTY0 + r);
-            if (_osmImages.contains(key))
-                p.drawImage(c * 256, r * 256, _osmImages[key]); // (c*256, r*256) 위치에 타일 그리기
-        }
-    p.end();
+    // ── dark_all 스티칭 ───────────────────────────────────────
+    QImage darkStitched(_osmTNX * 256, _osmTNY * 256, QImage::Format_RGB32);
+    darkStitched.fill(Qt::black);
+    {
+        QPainter p(&darkStitched);
+        for (int r = 0; r < _osmTNY; ++r)
+            for (int c = 0; c < _osmTNX; ++c) {
+                auto key = qMakePair(_osmTX0 + c, _osmTY0 + r);
+                if (_osmImages.contains(key))
+                    p.drawImage(c * 256, r * 256, _osmImages[key]);
+            }
+    }
 
-    // ── 스티칭 이미지에서 중심 기준 3km 서브영역 잘라내기 ─────
-    // subW × subH = 실제 메시 해상도 (픽셀 단위)
+    // ── Voyager 스티칭 (수역 마스크용) ───────────────────────
+    QImage lightStitched(_osmTNX * 256, _osmTNY * 256, QImage::Format_RGB32);
+    lightStitched.fill(Qt::white);
+    {
+        QPainter p(&lightStitched);
+        for (int r = 0; r < _osmTNY; ++r)
+            for (int c = 0; c < _osmTNX; ++c) {
+                auto key = qMakePair(_osmTX0 + c, _osmTY0 + r);
+                if (_voyagerImages.contains(key))
+                    p.drawImage(c * 256, r * 256, _voyagerImages[key]);
+            }
+    }
+
+    // ── 서브영역 기준값 ───────────────────────────────────────
     const int   subW      = _subHalfPx * 2 + 1;
     const int   subH      = _subHalfPx * 2 + 1;
-    const float SEA_DEPTH = -50.0f;  // 바다 높이값 (m)
-    const float LAND_H    = 1.0f;    // 육지 높이값 (m)
+    const float SEA_DEPTH = -1000.0f;  // 수역 고정 수심 1km
+    const float LAND_H    = 1.0f;
 
     // _currentTile에 높이 배열 세팅
     _currentTile.tileZ  = _zoom;
@@ -322,25 +373,90 @@ void TerrainWidget::stitchAndBuild()
     _currentTile.height = subH;
     _currentTile.heights.resize(subW * subH);
 
-    // 서브영역 픽셀마다 색을 읽어 바다/육지 판별
+    // Voyager 픽셀로 수역 판별 (b > r+15 && b > 150 && g > 150)
+    int waterCount = 0, landCount = 0;
+
+    // 5개 샘플 포인트 색상 출력 (중심 + 4모서리)
+    auto logPx = [&](int px, int py, const char* label) {
+        QRgb c = lightStitched.pixel(
+            qBound(0, px, lightStitched.width()  - 1),
+            qBound(0, py, lightStitched.height() - 1));
+        qInfo("Voyager [%s] RGB: (%d, %d, %d)", label, qRed(c), qGreen(c), qBlue(c));
+    };
+    logPx(_stitchCX,          _stitchCY,          "중심");
+    logPx(_stitchCX - _subHalfPx/2, _stitchCY,   "서쪽");
+    logPx(_stitchCX + _subHalfPx/2, _stitchCY,   "동쪽");
+    logPx(_stitchCX,          _stitchCY - _subHalfPx/2, "북쪽");
+    logPx(_stitchCX,          _stitchCY + _subHalfPx/2, "남쪽");
+
+    // 파랑 우세 픽셀 수 (임계값 완화 버전으로 실제 색상 범위 파악)
+    int blueLoose = 0;  // b > r (임계값 없이 파란 기운만 있으면)
+    for (int py = 0; py < lightStitched.height(); ++py)
+        for (int px = 0; px < lightStitched.width(); ++px) {
+            QRgb c = lightStitched.pixel(px, py);
+            if (qBlue(c) > qRed(c) + 5) ++blueLoose;
+        }
+    qInfo("파랑 우세 픽셀(b>r+5): %d / %d",
+          blueLoose, lightStitched.width() * lightStitched.height());
+
     for (int sy = 0; sy < subH; ++sy) {
         for (int sx = 0; sx < subW; ++sx) {
-            // 서브영역 픽셀 → 스티칭 이미지 픽셀 좌표 변환 (범위 초과 방지)
-            int px = qBound(0, _stitchCX - _subHalfPx + sx, stitched.width()  - 1);
-            int py = qBound(0, _stitchCY - _subHalfPx + sy, stitched.height() - 1);
-            QRgb  col = stitched.pixel(px, py);
-            int   r = qRed(col), g = qGreen(col), b = qBlue(col);
-            // CartoDB Positron 수색 판별: #AAD3DF 계열 → 파란 성분이 확실히 우세
-            bool  water = (b > r + 15) && (b > 150) && (g > 150);
+            int px = qBound(0, _stitchCX - _subHalfPx + sx, lightStitched.width()  - 1);
+            int py = qBound(0, _stitchCY - _subHalfPx + sy, lightStitched.height() - 1);
+            QRgb col = lightStitched.pixel(px, py);
+            int  r = qRed(col), g = qGreen(col), b = qBlue(col);
+            bool water = (b > r + 15) && (b > 150) && (g > 150);
             _currentTile.heights[sy * subW + sx] = water ? SEA_DEPTH : LAND_H;
+            water ? ++waterCount : ++landCount;
+        }
+    }
+    qInfo("수역 판별 결과: water=%d / land=%d (총 %d픽셀)",
+          waterCount, landCount, subW * subH);
+
+    // ── 높이맵 블러: 해안선 픽셀 계단 → 매끄러운 경사면 ────
+    // 분리형 박스 블러 3회 반복 (가우시안 근사)
+    constexpr int BLUR_RADIUS = 1;
+    constexpr int BLUR_PASS   = 3;
+    std::vector<float> tmp(subW * subH);
+    auto& h = _currentTile.heights;
+    for (int pass = 0; pass < BLUR_PASS; ++pass) {
+        // 가로 패스
+        for (int sy = 0; sy < subH; ++sy) {
+            for (int sx = 0; sx < subW; ++sx) {
+                float sum = 0.f; int cnt = 0;
+                for (int d = -BLUR_RADIUS; d <= BLUR_RADIUS; ++d) {
+                    int nx = qBound(0, sx + d, subW - 1);
+                    sum += h[sy * subW + nx]; ++cnt;
+                }
+                tmp[sy * subW + sx] = sum / cnt;
+            }
+        }
+        // 세로 패스
+        for (int sy = 0; sy < subH; ++sy) {
+            for (int sx = 0; sx < subW; ++sx) {
+                float sum = 0.f; int cnt = 0;
+                for (int d = -BLUR_RADIUS; d <= BLUR_RADIUS; ++d) {
+                    int ny = qBound(0, sy + d, subH - 1);
+                    sum += tmp[ny * subW + sx]; ++cnt;
+                }
+                h[sy * subW + sx] = sum / cnt;
+            }
         }
     }
 
-    // ── 스티칭 이미지를 임시 파일로 저장 (Qt3D 텍스처 로드용) ──
-    // seq로 매번 다른 파일명 생성 → 이전 텍스처와 충돌 방지
+    // ── 두 텍스처를 임시 파일로 저장 ─────────────────────────
     static int seq = 0;
-    _osmTexPath = QString("%1/holyuuv_osm_%2.png").arg(QDir::tempPath()).arg(++seq);
-    stitched.save(_osmTexPath);
+    ++seq;
+    _darkTexPath  = QString("%1/holyuuv_dark_%2.png").arg(QDir::tempPath()).arg(seq);
+    _lightTexPath = QString("%1/holyuuv_light_%2.png").arg(QDir::tempPath()).arg(seq);
+
+    bool darkSaved  = darkStitched.save(_darkTexPath);
+    bool lightSaved = lightStitched.save(_lightTexPath);
+    qInfo("텍스처 저장: dark=%s (%s) light=%s (%s)",
+          darkSaved  ? "OK" : "FAIL", qPrintable(_darkTexPath),
+          lightSaved ? "OK" : "FAIL", qPrintable(_lightTexPath));
+
+    _osmTexPath = _isDarkMode ? _darkTexPath : _lightTexPath;
 
     buildMesh();              // 높이맵 + 텍스처로 3D 메시 생성
     updateVehicleMarker();    // 로봇 위치 마커 갱신
@@ -354,6 +470,21 @@ void TerrainWidget::stitchAndBuild()
             .arg(_lon, 0, 'f', 5)
             .arg(subW).arg(subH)
             .arg(metersPerPixel(_lat, _zoom), 0, 'f', 1));
+}
+
+// =============================================================
+// 다크/라이트 모드 토글 (텍스처만 교체, 재다운로드 없음)
+// =============================================================
+void TerrainWidget::onModeToggled()
+{
+    _isDarkMode = !_isDarkMode;
+    _modeBtn->setText(_isDarkMode ? "Light Mode" : "Dark Mode");
+
+    if (_darkTexPath.isEmpty() || _lightTexPath.isEmpty()) return;
+
+    _osmTexPath = _isDarkMode ? _darkTexPath : _lightTexPath;
+    buildMesh();
+    updateVehicleMarker();
 }
 
 // =============================================================
@@ -395,12 +526,27 @@ void TerrainWidget::buildMesh()
         for (int sc = 0; sc < subW; ++sc) {   // sc = col (X축 방향, 서→동)
             float h = tile.heightAt(sc, sr);  // heights 배열에서 높이값 읽기
 
-            *vp++ = (sc - _subHalfPx) * scale;          // X: 서←중심→동
-            *vp++ = h * heightScale;                     // Y: 높이 (위쪽이 양수)
-            *vp++ = (sr - _subHalfPx) * scale;          // Z: 북←중심→남
-            *vp++ = 0.0f; *vp++ = 1.0f; *vp++ = 0.0f;  // 노말: 위쪽(0,1,0) 고정
-            *vp++ = (imgX0 + sc) / texW;                 // U: 텍스처 가로 좌표 (0~1)
-            *vp++ = (imgY0 + sr) / texH;                 // V: 텍스처 세로 좌표 (0~1)
+            *vp++ = (sc - _subHalfPx) * scale;
+            *vp++ = h * heightScale;
+            *vp++ = (sr - _subHalfPx) * scale;
+
+            // 인접 정점 높이차로 법선 계산 → 절벽면이 올바른 조명 받음
+            int sc0 = std::max(0, sc-1), sc1 = std::min(subW-1, sc+1);
+            int sr0 = std::max(0, sr-1), sr1 = std::min(subH-1, sr+1);
+            float dx   = (sc1 - sc0) * scale;
+            float dz   = (sr1 - sr0) * scale;
+            float dy_x = (tile.heightAt(sc1, sr) - tile.heightAt(sc0, sr)) * heightScale;
+            float dy_z = (tile.heightAt(sc, sr1) - tile.heightAt(sc, sr0)) * heightScale;
+            float nx = -dy_x * dz;
+            float ny =  dx * dz;
+            float nz = -dy_z * dx;
+            float nlen = std::sqrt(nx*nx + ny*ny + nz*nz);
+            if (nlen > 1e-6f) { nx /= nlen; ny /= nlen; nz /= nlen; }
+            else               { nx = 0.f; ny = 1.f; nz = 0.f; }
+            *vp++ = nx; *vp++ = ny; *vp++ = nz;
+
+            *vp++ = (imgX0 + sc) / texW;
+            *vp++ = (imgY0 + sr) / texH;
         }
     }
 
@@ -459,12 +605,13 @@ void TerrainWidget::buildMesh()
     renderer->setGeometry(geometry);
     renderer->setPrimitiveType(Qt3DRender::QGeometryRenderer::Triangles);
 
-    // OSM 텍스처 로드
+    // 텍스처 로드
+    qInfo("buildMesh: 텍스처 경로=%s", qPrintable(_osmTexPath));
     auto* tex = new Qt3DRender::QTexture2D(_rootEntity);
-    tex->setMinificationFilter(Qt3DRender::QAbstractTexture::Linear);  // 축소 시 부드럽게
-    tex->setMagnificationFilter(Qt3DRender::QAbstractTexture::Linear); // 확대 시 부드럽게
+    tex->setMinificationFilter(Qt3DRender::QAbstractTexture::Linear);
+    tex->setMagnificationFilter(Qt3DRender::QAbstractTexture::Linear);
     auto* texImg = new Qt3DRender::QTextureImage(tex);
-    texImg->setSource(QUrl::fromLocalFile(_osmTexPath)); // 임시 파일에서 로드
+    texImg->setSource(QUrl::fromLocalFile(_osmTexPath));
     texImg->setMirrored(false); // OpenGL 기본값은 Y축 뒤집힘 → false로 꺼야 북쪽이 위로
     tex->addTextureImage(texImg);
 

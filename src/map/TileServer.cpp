@@ -7,15 +7,9 @@
 static const QString CARTO_URL_TPL =
     "https://a.basemaps.cartocdn.com/dark_all/%1/%2/%3.png";
 
-// ESRI World Ocean Base (GEBCO 해저지형 데이터 포함)
-// ESRI 타일 형식은 tile/z/y/x 순서 (표준 z/x/y와 다름) → %1=z, %3=y, %2=x
-static const QString GEBCO_URL_TPL =
-    "https://services.arcgisonline.com/arcgis/rest/services/Ocean/World_Ocean_Base/MapServer/tile/%1/%3/%2";
-
-// Mapzen Terrain Tiles (AWS S3, Terrarium 인코딩)
-// height = R*256 + G + B/256 - 32768 (미터 단위)
-static const QString TERRAIN_URL_TPL =
-    "https://s3.amazonaws.com/elevation-tiles-prod/terrarium/%1/%2/%3.png";
+// CartoDB Voyager (선명한 파란 바다 → 수역 마스크용)
+static const QString VOYAGER_URL_TPL =
+    "https://a.basemaps.cartocdn.com/rastertiles/voyager/%1/%2/%3.png";
 
 // TileCache 비동기 응답(tileFound/tileMissed)을 이 TileServer 슬롯으로 연결
 TileServer::TileServer(TileCache* cache, QObject* parent)
@@ -90,8 +84,8 @@ void TileServer::onSocketDisconnected()
     socket->deleteLater();
 }
 
-// path에서 소스(osm/gebco) + z/x/y 파싱 → SQLite 비동기 조회 요청
-// path 형식: "/osm/10/886/410.png" 또는 "/gebco/10/886/410.png"
+// path에서 소스(osm/voyager) + z/x/y 파싱 → SQLite 비동기 조회 요청
+// path 형식: "/osm/10/886/410.png" 또는 "/voyager/10/886/410.png"
 void TileServer::handleRequest(QTcpSocket* socket, const QString& path)
 {
     QStringList segs = path.split('/', Qt::SkipEmptyParts);
@@ -100,7 +94,7 @@ void TileServer::handleRequest(QTcpSocket* socket, const QString& path)
         return;
     }
 
-    QString source = segs[0];  // "osm" 또는 "gebco"
+    QString source = segs[0];  // "osm" 또는 "voyager"
     QString yStr   = segs.last();
     yStr.remove(".png").remove(".jpg");
 
@@ -109,12 +103,9 @@ void TileServer::handleRequest(QTcpSocket* socket, const QString& path)
     QString y = yStr;
 
     QString key, url;
-    if (source == "gebco") {
-        key = QString("gebco/%1/%2/%3").arg(z, x, y);
-        url = GEBCO_URL_TPL.arg(z, x, y);
-    } else if (source == "terrain") {
-        key = QString("terrain/%1/%2/%3").arg(z, x, y);
-        url = TERRAIN_URL_TPL.arg(z, x, y);
+    if (source == "voyager") {
+        key = QString("voyager/%1/%2/%3").arg(z, x, y);
+        url = VOYAGER_URL_TPL.arg(z, x, y);
     } else {
         key = QString("carto_dark/%1/%2/%3").arg(z, x, y);
         url = CARTO_URL_TPL.arg(z, x, y);

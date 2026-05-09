@@ -87,18 +87,18 @@ void MainWindow::_setupUi()
     _mapWidget->setResizeMode(QQuickWidget::SizeRootObjectToView);
     tabs->addTab(_mapWidget, "OSM");
 
-    // ── GEBCO 탭 ────────────────────────────────────
-    _gebcoWidget = new QQuickWidget();
-    _gebcoWidget->rootContext()->setContextProperty("bridge", &_mapBridge);
-    _gebcoWidget->setSource(QUrl("qrc:/qml/GebcoView.qml"));
-    _gebcoWidget->setResizeMode(QQuickWidget::SizeRootObjectToView);
-    tabs->addTab(_gebcoWidget, "GEBCO");
+    // ── Voyager 맵 탭 ───────────────────────────────
+    _positronWidget = new QQuickWidget();
+    _positronWidget->rootContext()->setContextProperty("bridge", &_mapBridge);
+    _positronWidget->setSource(QUrl("qrc:/qml/PositronView.qml"));
+    _positronWidget->setResizeMode(QQuickWidget::SizeRootObjectToView);
+    tabs->addTab(_positronWidget, "Voyager");
 
     // ── 3D 지형 탭 ──────────────────────────────────
     _terrainWidget = new TerrainWidget();
     tabs->addTab(_terrainWidget, "3D Terrain");
 
-    // GEBCO 맵 중심으로 3D 탭 자동 로드
+    // OSM 맵 중심으로 3D 탭 자동 로드
     connect(tabs, &QTabWidget::currentChanged, [this, tabs](int) {
         if (tabs->currentWidget() == _terrainWidget)
             _terrainWidget->loadTile(_mapBridge.mapCenterLat(), _mapBridge.mapCenterLon(),

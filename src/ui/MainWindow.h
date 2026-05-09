@@ -51,7 +51,7 @@ private:
 
     // 맵
     MapBridge     _mapBridge;
-    QQuickWidget* _mapWidget     = nullptr;
-    QQuickWidget* _gebcoWidget   = nullptr;
+    QQuickWidget* _mapWidget      = nullptr;
+    QQuickWidget* _positronWidget = nullptr;
     TerrainWidget* _terrainWidget = nullptr;
 };

@@ -9,7 +9,7 @@
 #include "TileCache.h"
 
 // 로컬 HTTP 타일 프록시 (127.0.0.1:17777)
-// Qt Location → TileServer → TileCache(DB 스레드) → CartoDB
+// Qt Location → TileServer → TileCache(DB 스레드) → 타일 서버
 class TileServer : public QObject {
     Q_OBJECT
 public:
