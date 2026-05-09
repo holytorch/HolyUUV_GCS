@@ -8,6 +8,10 @@
 #include <QStandardPaths>
 #include <QDir>
 
+// ─────────────────────────────────────────────────────────────────────────────
+// MainWindow()
+// UI를 구성하고 VehicleState 변경 신호를 각 슬롯에 연결한다.
+// ─────────────────────────────────────────────────────────────────────────────
 MainWindow::MainWindow(VehicleState* state, QWidget* parent)
     : QMainWindow(parent), _state(state)
 {
@@ -21,11 +25,17 @@ MainWindow::MainWindow(VehicleState* state, QWidget* parent)
     connect(_state, &VehicleState::gpsChanged,      this, &MainWindow::onGpsChanged);
 }
 
+
+// ─────────────────────────────────────────────────────────────────────────────
+// _setupUi()
+// Status / OSM / Voyager / 3D Terrain 네 탭으로 구성된 UI를 생성한다.
+// 3D Terrain 탭으로 전환 시 OSM 맵 중심 좌표를 TerrainWidget에 전달한다.
+// ─────────────────────────────────────────────────────────────────────────────
 void MainWindow::_setupUi()
 {
     QTabWidget* tabs = new QTabWidget(this);
 
-    // ── Status 탭 (기존 UI) ──────────────────────────
+    // ── Status 탭 ────────────────────────────────────────────
     QWidget*     statusTab = new QWidget();
     QVBoxLayout* root      = new QVBoxLayout(statusTab);
 
@@ -56,13 +66,13 @@ void MainWindow::_setupUi()
     QGroupBox*   navGroup  = new QGroupBox("Navigation");
     QGridLayout* navLayout = new QGridLayout(navGroup);
     navLayout->addWidget(new QLabel("Depth:"),    0, 0);
-    navLayout->addWidget(_labelDepth    = new QLabel("--.- m"),  0, 1);
+    navLayout->addWidget(_labelDepth    = new QLabel("--.- m"),   0, 1);
     navLayout->addWidget(new QLabel("Speed:"),    0, 2);
-    navLayout->addWidget(_labelSpeed    = new QLabel("--.- m/s"),0, 3);
+    navLayout->addWidget(_labelSpeed    = new QLabel("--.- m/s"), 0, 3);
     navLayout->addWidget(new QLabel("Heading:"),  0, 4);
-    navLayout->addWidget(_labelHeading  = new QLabel("---°"),    0, 5);
+    navLayout->addWidget(_labelHeading  = new QLabel("---°"),     0, 5);
     navLayout->addWidget(new QLabel("Throttle:"), 1, 0);
-    navLayout->addWidget(_labelThrottle = new QLabel("---%"),    1, 1);
+    navLayout->addWidget(_labelThrottle = new QLabel("---%"),     1, 1);
     root->addWidget(navGroup);
 
     QGroupBox*   gpsGroup  = new QGroupBox("GPS");
@@ -78,7 +88,7 @@ void MainWindow::_setupUi()
     root->addStretch();
     tabs->addTab(statusTab, "Status");
 
-    // ── OSM 맵 탭 ───────────────────────────────────
+    // ── OSM 맵 탭 ────────────────────────────────────────────
     _mapBridge.initCacheDir();
 
     _mapWidget = new QQuickWidget();
@@ -87,18 +97,18 @@ void MainWindow::_setupUi()
     _mapWidget->setResizeMode(QQuickWidget::SizeRootObjectToView);
     tabs->addTab(_mapWidget, "OSM");
 
-    // ── Voyager 맵 탭 ───────────────────────────────
+    // ── Voyager 맵 탭 ─────────────────────────────────────────
     _positronWidget = new QQuickWidget();
     _positronWidget->rootContext()->setContextProperty("bridge", &_mapBridge);
     _positronWidget->setSource(QUrl("qrc:/qml/VoyagerView.qml"));
     _positronWidget->setResizeMode(QQuickWidget::SizeRootObjectToView);
     tabs->addTab(_positronWidget, "Voyager");
 
-    // ── 3D 지형 탭 ──────────────────────────────────
+    // ── 3D Terrain 탭 ─────────────────────────────────────────
     _terrainWidget = new TerrainWidget();
     tabs->addTab(_terrainWidget, "3D Terrain");
 
-    // OSM 맵 중심으로 3D 탭 자동 로드
+    // 3D 탭 전환 시 OSM 맵 현재 중심으로 지형 자동 로드
     connect(tabs, &QTabWidget::currentChanged, [this, tabs](int) {
         if (tabs->currentWidget() == _terrainWidget)
             _terrainWidget->loadTile(_mapBridge.mapCenterLat(), _mapBridge.mapCenterLon(),
@@ -108,6 +118,11 @@ void MainWindow::_setupUi()
     setCentralWidget(tabs);
 }
 
+
+// ─────────────────────────────────────────────────────────────────────────────
+// onBatteryChanged()
+// VehicleState::batteryChanged 신호에 연결된 슬롯.
+// ─────────────────────────────────────────────────────────────────────────────
 void MainWindow::onBatteryChanged()
 {
     _labelBattery->setText(QString("%1%").arg(_state->batteryRemaining()));
@@ -115,6 +130,11 @@ void MainWindow::onBatteryChanged()
     _labelCurrent->setText(QString("%1 A").arg(_state->current() / 100.0f, 0, 'f', 1));
 }
 
+
+// ─────────────────────────────────────────────────────────────────────────────
+// onAttitudeChanged()
+// VehicleState::attitudeChanged 신호에 연결된 슬롯. rad → deg 변환 후 표시.
+// ─────────────────────────────────────────────────────────────────────────────
 void MainWindow::onAttitudeChanged()
 {
     const float toDeg = 180.0f / 3.14159265f;
@@ -123,6 +143,12 @@ void MainWindow::onAttitudeChanged()
     _labelYaw  ->setText(QString("%1°").arg(_state->yaw()   * toDeg, 0, 'f', 1));
 }
 
+
+// ─────────────────────────────────────────────────────────────────────────────
+// onVfrHudChanged()
+// VehicleState::vfrHudChanged 신호에 연결된 슬롯.
+// depth는 VFR_HUD altitude의 부호 반전값(수심이 양수로 표시되도록).
+// ─────────────────────────────────────────────────────────────────────────────
 void MainWindow::onVfrHudChanged()
 {
     _labelDepth   ->setText(QString("%1 m").arg(-_state->depth(), 0, 'f', 2));
@@ -131,6 +157,12 @@ void MainWindow::onVfrHudChanged()
     _labelThrottle->setText(QString("%1%").arg(_state->throttle()));
 }
 
+
+// ─────────────────────────────────────────────────────────────────────────────
+// onGpsChanged()
+// VehicleState::gpsChanged 신호에 연결된 슬롯.
+// GPS 좌표를 MapBridge와 TerrainWidget에도 전달한다.
+// ─────────────────────────────────────────────────────────────────────────────
 void MainWindow::onGpsChanged()
 {
     _labelSats  ->setText(QString::number(_state->gpsSatCount()));
@@ -143,6 +175,11 @@ void MainWindow::onGpsChanged()
     _terrainWidget->updateVehiclePosition(_state->latitude(), _state->longitude());
 }
 
+
+// ─────────────────────────────────────────────────────────────────────────────
+// onLinkConnected() / onLinkDisconnected()
+// LinkManager 상태 변경 시 상태 레이블 색상과 텍스트를 갱신한다.
+// ─────────────────────────────────────────────────────────────────────────────
 void MainWindow::onLinkConnected()
 {
     _labelStatus->setText("● Connected");

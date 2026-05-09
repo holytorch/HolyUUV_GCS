@@ -1,33 +1,46 @@
 #include "LinkManager.h"
 #include "util/log/logger.h"
 
+// ─────────────────────────────────────────────────────────────────────────────
+// LinkManager()
+// ─────────────────────────────────────────────────────────────────────────────
 LinkManager::LinkManager(QObject* parent) : QObject(parent) {}
 
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ~LinkManager()
+// 소멸 시 활성 링크를 안전하게 해제한다.
+// ─────────────────────────────────────────────────────────────────────────────
 LinkManager::~LinkManager()
 {
     removeLink();
 }
 
+
+// ─────────────────────────────────────────────────────────────────────────────
+// setLink()
+// 이전 링크가 있으면 먼저 해제한 뒤 새 링크의 소유권을 넘겨받는다.
+// ILink의 시그널을 LinkManager 시그널로 중계하도록 연결하고 connectLink()를 호출한다.
+// 반환값: connectLink() 결과 (포트 열기·소켓 바인딩 성공 여부).
+// ─────────────────────────────────────────────────────────────────────────────
 bool LinkManager::setLink(std::unique_ptr<ILink> link)
 {
-    // 기존 링크가 있으면 먼저 끊고 제거
     removeLink();
-
-    // 소유권 이전: Application이 만든 SerialLink/UdpLink를 _link가 넘겨받음
-    // unique_ptr은 복사 불가 → move로 소유권만 이동 (이후 link는 null)
     _link = std::move(link);
 
-    // ILink 시그널 → LinkManager 시그널로 중계
-    // SerialLink/UdpLink 내부 이벤트를 외부(Application)에서 받을 수 있게 연결
     connect(_link.get(), &ILink::bytesReceived,    this, &LinkManager::bytesReceived);
     connect(_link.get(), &ILink::linkConnected,    this, &LinkManager::linkConnected);
     connect(_link.get(), &ILink::linkDisconnected, this, &LinkManager::linkDisconnected);
     connect(_link.get(), &ILink::linkError,        this, &LinkManager::linkError);
 
-    // 실제 연결 시도 후 성공 여부 반환 (Serial이면 포트 열기, UDP면 소켓 바인딩)
     return _link->connectLink();
 }
 
+
+// ─────────────────────────────────────────────────────────────────────────────
+// removeLink()
+// 현재 링크를 연결 해제하고 삭제한다.
+// ─────────────────────────────────────────────────────────────────────────────
 void LinkManager::removeLink()
 {
     if (_link) {
@@ -36,11 +49,21 @@ void LinkManager::removeLink()
     }
 }
 
+
+// ─────────────────────────────────────────────────────────────────────────────
+// isConnected()
+// 활성 링크가 있고 연결된 상태이면 true를 반환한다.
+// ─────────────────────────────────────────────────────────────────────────────
 bool LinkManager::isConnected() const
 {
     return _link && _link->isConnected();
 }
 
+
+// ─────────────────────────────────────────────────────────────────────────────
+// sendBytes()
+// 활성 링크로 데이터를 전송한다. 링크가 없으면 false를 반환한다.
+// ─────────────────────────────────────────────────────────────────────────────
 bool LinkManager::sendBytes(const QByteArray& data)
 {
     if (!_link) return false;

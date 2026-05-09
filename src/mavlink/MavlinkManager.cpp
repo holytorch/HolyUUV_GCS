@@ -1,8 +1,18 @@
 #include "MavlinkManager.h"
 #include "util/log/logger.h"
 
+// ─────────────────────────────────────────────────────────────────────────────
+// MavlinkManager()
+// ─────────────────────────────────────────────────────────────────────────────
 MavlinkManager::MavlinkManager(QObject* parent) : QObject(parent) {}
 
+
+// ─────────────────────────────────────────────────────────────────────────────
+// parseBytes()
+// 수신 바이트를 한 바이트씩 MAVLink 파서에 공급한다.
+// 완전한 패킷이 완성되면 메시지 ID에 따라 해당 시그널을 발신한다.
+// MAVLINK_AVAILABLE이 정의되지 않은 빌드에서는 데이터를 무시한다.
+// ─────────────────────────────────────────────────────────────────────────────
 void MavlinkManager::parseBytes(const QByteArray& data)
 {
 #ifdef MAVLINK_AVAILABLE
@@ -80,7 +90,7 @@ void MavlinkManager::parseBytes(const QByteArray& data)
                     MavlinkGlobalPosition out;
                     out.lat         = pos.lat / 1e7;
                     out.lon         = pos.lon / 1e7;
-                    out.alt         = pos.alt  / 1000.0f;
+                    out.alt         = pos.alt / 1000.0f;
                     out.relativeAlt = pos.relative_alt / 1000.0f;
                     emit globalPositionReceived(out);
                     break;

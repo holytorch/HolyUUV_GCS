@@ -8,8 +8,19 @@
 #include <QHash>
 #include "TileCache.h"
 
-// 로컬 HTTP 타일 프록시 (127.0.0.1:17777)
-// Qt Location → TileServer → TileCache(DB 스레드) → 타일 서버
+// ─────────────────────────────────────────────────────────────────────────────
+// TileServer
+// 127.0.0.1:17777 에서 동작하는 로컬 HTTP 타일 프록시 서버.
+//
+// 요청 경로 형식: /{source}/{z}/{x}/{y}.png
+//   osm     → CartoDB dark_all  (3D 지형 텍스처 및 OSM 탭)
+//   voyager → CartoDB Voyager   (수역 마스크 및 Voyager 탭)
+//
+// 처리 흐름:
+//   HTTP GET 수신 → handleRequest() → TileCache.lookup()
+//     캐시 히트: onTileFound()  → sendTile()  → 소켓 응답
+//     캐시 미스: onTileMissed() → fetchAndCache() → CartoDB → store() → sendTile()
+// ─────────────────────────────────────────────────────────────────────────────
 class TileServer : public QObject {
     Q_OBJECT
 public:
@@ -24,7 +35,6 @@ private slots:
     void onReadyRead();
     void onSocketDisconnected();
 
-    // TileCache 비동기 응답 수신
     void onTileFound(QPointer<QTcpSocket> socket, const QByteArray& data);
     void onTileMissed(QPointer<QTcpSocket> socket, const QString& key, const QString& url);
 

@@ -9,34 +9,38 @@ Q_DECLARE_METATYPE(QPointer<QTcpSocket>)
 
 class TileCacheWorker;
 
-// ── 타일 캐시 구조 ──────────────────────────────────────────
-// 1순위: Qt 파일캐시 (50MB) - Qt Location 내장, 히트시 TileServer 요청 없음
-// 2순위: SQLite (5GB)       - TileServer가 관리, 오프라인 장기 보관
-// 3순위: CartoDB (인터넷)   - SQLite 미스시 다운로드 후 SQLite에 저장
+// ─────────────────────────────────────────────────────────────────────────────
+// TileCache
+// 타일 캐시의 메인 스레드 프록시. 실제 DB 작업은 별도 스레드의 TileCacheWorker가 수행한다.
 //
-// Qt 파일캐시 미스 → TileServer(127.0.0.1:17777) → SQLite 조회
-//   히트: SQLite에서 반환 (인터넷 요청 없음)
-//   미스: CartoDB 다운로드 → SQLite 저장 → 반환
-// ────────────────────────────────────────────────────────────
-
-// 메인 스레드에서 사용하는 프록시 — 실제 DB 작업은 TileCacheWorker(별도 스레드)가 수행
+// 캐시 계층:
+//   1순위: SQLite (최대 5 GB, LRU 자동 삭제)  — TileServer 관리
+//   2순위: CartoDB 원격 서버                   — SQLite 미스 시 다운로드 후 저장
+//
+// 사용 흐름:
+//   TileServer.handleRequest()
+//     → TileCache.lookup()               (메인 스레드)
+//       → TileCacheWorker.lookup()       (DB 스레드, QueuedConnection)
+//         히트: tileFound  신호 → TileServer.onTileFound()  → 소켓 응답
+//         미스: tileMissed 신호 → TileServer.onTileMissed() → CartoDB 다운로드
+//   TileServer.fetchAndCache()
+//     → TileCache.store()                (메인 스레드)
+//       → TileCacheWorker.store()        (DB 스레드)
+// ─────────────────────────────────────────────────────────────────────────────
 class TileCache : public QObject {
     Q_OBJECT
 public:
     explicit TileCache(const QString& dbPath = QString(), QObject* parent = nullptr);
     ~TileCache();
 
-    // 비동기 조회: 결과는 tileFound / tileMissed 신호로 수신
     void lookup(const QString& key, QPointer<QTcpSocket> socket, const QString& url);
-
-    // 비동기 저장
     void store(const QString& key, const QByteArray& data);
 
 signals:
     void tileFound(QPointer<QTcpSocket> socket, const QByteArray& data);
     void tileMissed(QPointer<QTcpSocket> socket, const QString& key, const QString& url);
 
-    // 내부용: 메인 스레드 → 워커 스레드 (QueuedConnection 자동 적용)
+    // 내부 전용: 메인 → 워커 (QueuedConnection 자동 적용)
     void _doInit(const QString& dbPath);
     void _doLookup(const QString& key, QPointer<QTcpSocket> socket, const QString& url);
     void _doStore(const QString& key, const QByteArray& data);

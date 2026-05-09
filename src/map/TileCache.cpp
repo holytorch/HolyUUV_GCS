@@ -3,46 +3,64 @@
 #include <QStandardPaths>
 #include <QDebug>
 
+// ─────────────────────────────────────────────────────────────────────────────
+// TileCache()
+// TileCacheWorker를 별도 스레드로 이동시키고 메인↔워커 신호 연결을 설정한다.
+// dbPath가 비어 있으면 기본 캐시 경로를 사용한다 (~/.cache/HolyUUV_GCS/tiles/tiles.db).
+// DB 초기화는 _doInit 신호를 통해 워커 스레드에서 비동기로 수행된다.
+// ─────────────────────────────────────────────────────────────────────────────
 TileCache::TileCache(const QString& dbPath, QObject* parent)
     : QObject(parent)
     , _thread(new QThread(this))
     , _worker(new TileCacheWorker)
 {
-    // QPointer<QTcpSocket>를 스레드간 신호 파라미터로 쓰기 위해 등록
     qRegisterMetaType<QPointer<QTcpSocket>>("QPointer<QTcpSocket>");
 
-    //dbPath이 비어있으면 기본 캐시 위치에 tiles/tiles.db로 설정(~/.cache/HolyUUV_GCS/tiles/tiles.db)
     QString path = dbPath.isEmpty()
         ? QStandardPaths::writableLocation(QStandardPaths::CacheLocation) + "/tiles/tiles.db"
         : dbPath;
 
     _worker->moveToThread(_thread);
 
-    // 메인 → 워커 (QueuedConnection: 워커 스레드의 이벤트 루프에서 실행됨)
     connect(this, &TileCache::_doInit,   _worker, &TileCacheWorker::init);
     connect(this, &TileCache::_doLookup, _worker, &TileCacheWorker::lookup);
     connect(this, &TileCache::_doStore,  _worker, &TileCacheWorker::store);
 
-    // 워커 → 메인 (결과 중계)
     connect(_worker, &TileCacheWorker::tileFound,  this, &TileCache::tileFound);
     connect(_worker, &TileCacheWorker::tileMissed, this, &TileCache::tileMissed);
 
     _thread->start();
-    emit _doInit(path);  // DB 초기화를 워커 스레드에서 실행
+    emit _doInit(path);
 }
 
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ~TileCache()
+// 워커 스레드의 이벤트 루프를 종료하고 완전히 멈출 때까지 대기한 뒤 워커를 삭제한다.
+// ─────────────────────────────────────────────────────────────────────────────
 TileCache::~TileCache()
 {
     _thread->quit();
-    _thread->wait();  // 워커 스레드 종료 대기
+    _thread->wait();
     delete _worker;
 }
 
+
+// ─────────────────────────────────────────────────────────────────────────────
+// lookup()
+// _doLookup 신호를 통해 워커 스레드에 비동기 조회를 요청한다.
+// 결과는 tileFound 또는 tileMissed 신호로 수신된다.
+// ─────────────────────────────────────────────────────────────────────────────
 void TileCache::lookup(const QString& key, QPointer<QTcpSocket> socket, const QString& url)
 {
     emit _doLookup(key, socket, url);
 }
 
+
+// ─────────────────────────────────────────────────────────────────────────────
+// store()
+// _doStore 신호를 통해 워커 스레드에 비동기 저장을 요청한다.
+// ─────────────────────────────────────────────────────────────────────────────
 void TileCache::store(const QString& key, const QByteArray& data)
 {
     emit _doStore(key, data);

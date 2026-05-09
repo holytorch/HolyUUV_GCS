@@ -4,19 +4,24 @@
 #include <memory>
 #include "ILink.h"
 
+// ─────────────────────────────────────────────────────────────────────────────
+// LinkManager
+// 단일 활성 링크(SerialLink 또는 UdpLink)를 소유하고 관리한다.
+// setLink()로 링크를 교체하면 이전 링크를 안전하게 해제한 뒤 새 링크를 연결한다.
+// ILink의 시그널을 그대로 재발신해 외부(Application)가 링크 종류 변경에 무관하게
+// 동일한 시그널을 사용할 수 있게 한다.
+// ─────────────────────────────────────────────────────────────────────────────
 class LinkManager : public QObject {
-    //qt의 모든 클래스 조상
     Q_OBJECT
 public:
-    //생성자 소멸자 적어놓음
     explicit LinkManager(QObject* parent = nullptr);
     ~LinkManager() override;
 
     bool setLink(std::unique_ptr<ILink> link);
     void removeLink();
 
-    bool    isConnected() const;
-    ILink*  activeLink() const { return _link.get(); }
+    bool    isConnected()                       const;
+    ILink*  activeLink()                        const { return _link.get(); }
     bool    sendBytes(const QByteArray& data);
 
 signals:
@@ -26,6 +31,5 @@ signals:
     void linkError(const QString& message);
 
 private:
-    // 멤버 변수 (Stack Memory에 미리 할당됨)
     std::unique_ptr<ILink> _link;
 };

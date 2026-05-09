@@ -5,6 +5,10 @@
 #include <QFileInfo>
 #include <QDebug>
 
+// ─────────────────────────────────────────────────────────────────────────────
+// ~TileCacheWorker()
+// DB 연결을 닫고 Qt SQL 드라이버에서 연결 이름을 제거한다.
+// ─────────────────────────────────────────────────────────────────────────────
 TileCacheWorker::~TileCacheWorker()
 {
     if (_db.isOpen()) {
@@ -14,14 +18,18 @@ TileCacheWorker::~TileCacheWorker()
     }
 }
 
-// DB 초기화 — 워커 스레드에서 실행되므로 connection이 이 스레드에 귀속됨
+
+// ─────────────────────────────────────────────────────────────────────────────
+// init()
+// 워커 스레드에서 실행된다. DB 파일 경로를 보장하고 SQLite 연결을 열고
+// WAL 모드를 설정한 뒤 tiles 테이블을 생성한다.
+// QSqlDatabase 연결은 생성한 스레드에만 귀속된다는 Qt 제약을 준수하기 위해
+// 반드시 이 함수 안에서 생성해야 한다.
+// ─────────────────────────────────────────────────────────────────────────────
 void TileCacheWorker::init(const QString& dbPath)
 {
-    // 데이터베이스 파일이 저장될 디렉토리가 없으면 생성
     QDir().mkpath(QFileInfo(dbPath).absolutePath());
 
-    // SQLite 드라이버를 로드하고 연결 이름을 설정
-    // "QSQLITE"는 별도의 서버 없이 로컬 파일로 작동하는 DB 엔진
     _db = QSqlDatabase::addDatabase("QSQLITE", _connName);
     _db.setDatabaseName(dbPath);
 
@@ -30,20 +38,22 @@ void TileCacheWorker::init(const QString& dbPath)
         return;
     }
 
-    // WAL 모드로 쓰기 성능 향상, 동시 읽기 허용
     QSqlQuery pragma(_db);
     pragma.exec("PRAGMA journal_mode=WAL");
     pragma.exec("PRAGMA synchronous=NORMAL");
 
-    // 테이블 생성
     createTable();
     qInfo("TileCacheWorker: opened %s (worker thread)", qPrintable(dbPath));
 }
 
+
+// ─────────────────────────────────────────────────────────────────────────────
+// createTable()
+// tiles 테이블과 ts 인덱스를 생성한다 (없으면). ts는 LRU 삭제 기준으로 사용된다.
+// ─────────────────────────────────────────────────────────────────────────────
 void TileCacheWorker::createTable()
 {
     QSqlQuery q(_db);
-    // tiles 테이블: key(타일 식별자), data(타일 이미지), ts(마지막 접근 시각, LRU 삭제용)
     q.exec(R"(
         CREATE TABLE IF NOT EXISTS tiles (
             key  TEXT PRIMARY KEY,
@@ -51,12 +61,16 @@ void TileCacheWorker::createTable()
             ts   INTEGER NOT NULL DEFAULT (strftime('%s','now'))
         )
     )");
-    // ts 인덱스: LRU 삭제 시 ORDER BY ts가 빠르게 동작하도록
     q.exec("CREATE INDEX IF NOT EXISTS idx_tiles_ts ON tiles(ts)");
 }
 
-// Qt 파일캐시 미스 시 TileServer가 호출
-// SQLite에서 타일 조회 → 히트: tileFound 신호 / 미스: tileMissed 신호 → CartoDB 다운로드로 넘어감
+
+// ─────────────────────────────────────────────────────────────────────────────
+// lookup()
+// key로 SQLite를 조회한다.
+//   히트: ts를 현재 시각으로 갱신(LRU 보존)하고 tileFound 신호를 발신한다.
+//   미스: tileMissed 신호를 발신해 TileServer가 원격 다운로드를 시작하게 한다.
+// ─────────────────────────────────────────────────────────────────────────────
 void TileCacheWorker::lookup(const QString& key, QPointer<QTcpSocket> socket, const QString& url)
 {
     QSqlQuery q(_db);
@@ -66,7 +80,6 @@ void TileCacheWorker::lookup(const QString& key, QPointer<QTcpSocket> socket, co
     if (q.exec() && q.next()) {
         QByteArray data = q.value(0).toByteArray();
 
-        // LRU: 조회할 때마다 ts 갱신 → 자주 쓰는 타일은 삭제 대상에서 밀려남
         QSqlQuery upd(_db);
         upd.prepare("UPDATE tiles SET ts = strftime('%s','now') WHERE key = ?");
         upd.addBindValue(key);
@@ -79,7 +92,12 @@ void TileCacheWorker::lookup(const QString& key, QPointer<QTcpSocket> socket, co
     emit tileMissed(socket, key, url);
 }
 
-// CartoDB에서 다운로드한 타일을 SQLite에 저장 (put() 호출 후 자동으로 5GB 초과 시 LRU 삭제)
+
+// ─────────────────────────────────────────────────────────────────────────────
+// store()
+// 타일 데이터를 SQLite에 저장(존재하면 교체)하고 evictIfNeeded()를 호출해
+// 캐시 크기를 제한 이하로 유지한다.
+// ─────────────────────────────────────────────────────────────────────────────
 void TileCacheWorker::store(const QString& key, const QByteArray& data)
 {
     QSqlQuery q(_db);
@@ -96,7 +114,12 @@ void TileCacheWorker::store(const QString& key, const QByteArray& data)
     evictIfNeeded();
 }
 
-// put() 호출 후 자동 실행 → 5GB 초과 시 ts 오래된 타일부터 삭제해서 4GB로 줄임 (LRU)
+
+// ─────────────────────────────────────────────────────────────────────────────
+// evictIfNeeded()
+// 전체 데이터 크기가 MAX_BYTES(5 GB)를 초과하면 ts가 가장 오래된 타일부터
+// 삭제해 EVICT_BYTES(4 GB) 이하로 줄인다.
+// ─────────────────────────────────────────────────────────────────────────────
 void TileCacheWorker::evictIfNeeded()
 {
     QSqlQuery q(_db);

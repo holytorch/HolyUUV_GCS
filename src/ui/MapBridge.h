@@ -3,6 +3,17 @@
 #include <QObject>
 #include <QStandardPaths>
 
+// ─────────────────────────────────────────────────────────────────────────────
+// MapBridge
+// C++ ↔ QML 브릿지 객체. QML의 MapView / VoyagerView에서 차량 위치와
+// 타일 캐시 경로에 접근할 수 있도록 Q_PROPERTY로 노출한다.
+//
+// QML에서의 사용:
+//   bridge.latitude, bridge.longitude — 차량 위치 (GPS 수신 후 갱신)
+//   bridge.hasPosition                — GPS 수신 여부
+//   bridge.mapCenterLat/Lon           — 사용자가 맵을 이동할 때 QML이 호출로 갱신
+//   bridge.tileCachePath              — Qt Location 파일 캐시 기본 경로
+// ─────────────────────────────────────────────────────────────────────────────
 class MapBridge : public QObject {
     Q_OBJECT
     Q_PROPERTY(double  latitude      READ latitude      NOTIFY positionChanged)

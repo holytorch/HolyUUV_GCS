@@ -2,13 +2,33 @@
 #include "comm/UdpLink.h"
 #include "comm/SerialLink.h"
 #include "comm/UsbBoardInfo.h"
+#include <QApplication>
 #include <QSerialPortInfo>
 
-Application::Application(QObject* parent) : QObject(parent)
-{
-    _tileServer.start();
+// ─────────────────────────────────────────────────────────────────────────────
+// Application()
+// ─────────────────────────────────────────────────────────────────────────────
+Application::Application(QObject* parent) : QObject(parent) {}
 
-    // 링크 상태 → MainWindow
+
+// ─────────────────────────────────────────────────────────────────────────────
+// initialize()
+// 모든 하위 시스템을 연결하고 애플리케이션을 시작한다.
+//
+// 초기화 순서:
+//   1. TileServer 시작 (127.0.0.1:17777 리슨)
+//   2. LinkManager ↔ MainWindow 연결 (접속·해제 상태 표시)
+//   3. LinkManager → MavlinkManager → VehicleState 데이터 파이프라인 구성
+//   4. MainWindow 표시
+//   5. USB 시리얼 포트 스캔 → 감지되면 SerialLink, 없으면 UdpLink(14550) 사용
+// ─────────────────────────────────────────────────────────────────────────────
+bool Application::initialize()
+{
+    if (!_tileServer.start()) {
+        qCritical("Application: TileServer 시작 실패");
+        return false;
+    }
+
     connect(&_linkManager, &LinkManager::linkConnected,
             &_mainWindow, &MainWindow::onLinkConnected);
     connect(&_linkManager, &LinkManager::linkDisconnected,
@@ -17,11 +37,9 @@ Application::Application(QObject* parent) : QObject(parent)
         qCritical("Link error: %s", qPrintable(msg));
     });
 
-    // 수신 바이트 → MAVLink 파싱
     connect(&_linkManager, &LinkManager::bytesReceived,
             &_mavlinkManager, &MavlinkManager::parseBytes);
 
-    // MAVLink → VehicleState
     connect(&_mavlinkManager, &MavlinkManager::sysStatusReceived,
             [this](const MavlinkSysStatus& s) {
         _vehicleState.updateBattery(s.batteryRemaining,
@@ -47,7 +65,6 @@ Application::Application(QObject* parent) : QObject(parent)
 
     _mainWindow.show();
 
-    // Serial 포트 스캔 → VID/PID로 MAVLink 보드 감지, 없으면 UDP
     QString mavlinkPort;
     const UsbBoardInfo& boardInfo = UsbBoardInfo::instance();
     for (const QSerialPortInfo& info : QSerialPortInfo::availablePorts()) {
@@ -72,4 +89,26 @@ Application::Application(QObject* parent) : QObject(parent)
         qInfo("Serial port 없음 → UDP 14550");
         _linkManager.setLink(std::make_unique<UdpLink>(config));
     }
+
+    return true;
+}
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// run()
+// Qt 이벤트 루프를 시작한다. 창이 닫힐 때까지 블로킹되고 종료 코드를 반환한다.
+// ─────────────────────────────────────────────────────────────────────────────
+int Application::run()
+{
+    return QApplication::exec();
+}
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// shutdown()
+// 이벤트 루프 종료 후 호출된다. 현재는 Qt 부모 관계로 자동 정리된다.
+// ─────────────────────────────────────────────────────────────────────────────
+void Application::shutdown()
+{
+    qInfo("Application: shutdown");
 }

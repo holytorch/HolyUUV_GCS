@@ -4,14 +4,23 @@
 #include <QUrl>
 #include <QDebug>
 
+// ─────────────────────────────────────────────────────────────────────────────
+// 타일 URL 템플릿
+// %1 = zoom, %2 = tileX, %3 = tileY
+// ─────────────────────────────────────────────────────────────────────────────
 static const QString CARTO_URL_TPL =
     "https://a.basemaps.cartocdn.com/dark_all/%1/%2/%3.png";
 
-// CartoDB Voyager (선명한 파란 바다 → 수역 마스크용)
 static const QString VOYAGER_URL_TPL =
     "https://a.basemaps.cartocdn.com/rastertiles/voyager/%1/%2/%3.png";
 
-// TileCache 비동기 응답(tileFound/tileMissed)을 이 TileServer 슬롯으로 연결
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 생성자
+// TileCache의 tileFound / tileMissed 신호를 이 서버의 슬롯에 연결한다.
+// tileFound  → SQLite 히트, 바로 응답
+// tileMissed → SQLite 미스, 원격 서버에서 다운로드 후 응답
+// ─────────────────────────────────────────────────────────────────────────────
 TileServer::TileServer(TileCache* cache, QObject* parent)
     : QObject(parent)
     , _cache(cache)
@@ -20,7 +29,12 @@ TileServer::TileServer(TileCache* cache, QObject* parent)
     connect(_cache, &TileCache::tileMissed, this, &TileServer::onTileMissed);
 }
 
-// 127.0.0.1:17777 에서 HTTP 서버 시작
+
+// ─────────────────────────────────────────────────────────────────────────────
+// start()
+// 127.0.0.1:17777 에서 TCP 리슨을 시작한다.
+// Qt Location(QML 맵)과 TerrainWidget이 이 포트로 타일을 요청한다.
+// ─────────────────────────────────────────────────────────────────────────────
 bool TileServer::start()
 {
     if (!_server.listen(QHostAddress::LocalHost, PORT)) {
@@ -32,35 +46,43 @@ bool TileServer::start()
     return true;
 }
 
-// 새 클라이언트 연결 처리 (Qt Location이 타일 요청할 때마다 호출)
+
+// ─────────────────────────────────────────────────────────────────────────────
+// onNewConnection()
+// 새 TCP 연결이 들어올 때마다 호출된다.
+// 소켓마다 수신 버퍼를 초기화하고 readyRead / disconnected 시그널을 연결한다.
+// 동시 요청이 여러 개일 수 있으므로 while 로 한 번에 처리한다.
+// ─────────────────────────────────────────────────────────────────────────────
 void TileServer::onNewConnection()
 {
-    // 동시에 여러 연결이 올 수 있어서 while로 전부 처리
     while (_server.hasPendingConnections()) {
         QTcpSocket* socket = _server.nextPendingConnection();
-        _socketBuffers[socket] = QByteArray();  // 소켓별 HTTP 수신 버퍼 초기화
+        _socketBuffers[socket] = QByteArray();
 
         connect(socket, &QTcpSocket::readyRead,    this, &TileServer::onReadyRead);
         connect(socket, &QTcpSocket::disconnected, this, &TileServer::onSocketDisconnected);
     }
 }
 
-// 소켓에서 데이터 수신 시 호출 → HTTP 요청 파싱
+
+// ─────────────────────────────────────────────────────────────────────────────
+// onReadyRead()
+// 소켓에 데이터가 도착할 때마다 호출된다.
+// TCP 특성상 한 번에 전체가 오지 않을 수 있으므로 버퍼에 누적한 뒤
+// HTTP 헤더 끝(\r\n\r\n)이 감지되면 요청 첫 줄을 파싱해 handleRequest()로 넘긴다.
+// GET 이외의 메서드는 404로 응답한다.
+// ─────────────────────────────────────────────────────────────────────────────
 void TileServer::onReadyRead()
 {
-    // readyRead 신호를 보낸 소켓이 누구인지 확인 (소켓이 여러 개라 구분 필요)
     QTcpSocket* socket = qobject_cast<QTcpSocket*>(sender());
     if (!socket) return;
 
-    // TCP는 데이터가 여러 패킷으로 나뉘어 올 수 있어서 버퍼에 누적
     _socketBuffers[socket] += socket->readAll();
 
     const QByteArray& buf = _socketBuffers[socket];
-    // \r\n\r\n = HTTP 헤더 끝, 없으면 아직 요청이 완전히 안 온 것 → 더 기다림
     int headerEnd = buf.indexOf("\r\n\r\n");
     if (headerEnd < 0) return;
 
-    // 첫 줄 파싱: "GET /10/886/410.png HTTP/1.1" → ["GET", "/10/886/410.png", "HTTP/1.1"]
     QString firstLine = QString::fromLatin1(buf.left(buf.indexOf("\r\n")));
     QStringList parts = firstLine.split(' ');
     if (parts.size() < 2 || parts[0] != "GET") {
@@ -69,13 +91,17 @@ void TileServer::onReadyRead()
         return;
     }
 
-    QString path = parts[1];  // "/10/886/410.png"
+    QString path = parts[1];
     _socketBuffers[socket].clear();
 
     handleRequest(socket, path);
 }
 
-// 연결 해제 시 버퍼 및 소켓 정리
+
+// ─────────────────────────────────────────────────────────────────────────────
+// onSocketDisconnected()
+// 클라이언트가 연결을 끊으면 해당 소켓의 수신 버퍼를 제거하고 소켓을 삭제한다.
+// ─────────────────────────────────────────────────────────────────────────────
 void TileServer::onSocketDisconnected()
 {
     QTcpSocket* socket = qobject_cast<QTcpSocket*>(sender());
@@ -84,8 +110,16 @@ void TileServer::onSocketDisconnected()
     socket->deleteLater();
 }
 
-// path에서 소스(osm/voyager) + z/x/y 파싱 → SQLite 비동기 조회 요청
-// path 형식: "/osm/10/886/410.png" 또는 "/voyager/10/886/410.png"
+
+// ─────────────────────────────────────────────────────────────────────────────
+// handleRequest()
+// URL 경로를 파싱해 타일 소스(osm / voyager)와 z/x/y 좌표를 추출한다.
+// 소스에 따라 SQLite 캐시 키와 원격 URL을 결정한 뒤 TileCache에 비동기 조회를 요청한다.
+//
+// 경로 형식: /{source}/{z}/{x}/{y}.png
+//   osm     → CartoDB dark_all  (3D 지형 텍스처 및 OSM 탭 표시용)
+//   voyager → CartoDB Voyager   (수역 마스크 생성 및 Voyager 탭 표시용)
+// ─────────────────────────────────────────────────────────────────────────────
 void TileServer::handleRequest(QTcpSocket* socket, const QString& path)
 {
     QStringList segs = path.split('/', Qt::SkipEmptyParts);
@@ -94,7 +128,7 @@ void TileServer::handleRequest(QTcpSocket* socket, const QString& path)
         return;
     }
 
-    QString source = segs[0];  // "osm" 또는 "voyager"
+    QString source = segs[0];
     QString yStr   = segs.last();
     yStr.remove(".png").remove(".jpg");
 
@@ -111,33 +145,46 @@ void TileServer::handleRequest(QTcpSocket* socket, const QString& path)
         url = CARTO_URL_TPL.arg(z, x, y);
     }
 
-    // 비동기 DB 조회 → onTileFound 또는 onTileMissed 콜백
     _cache->lookup(key, QPointer<QTcpSocket>(socket), url);
 }
 
-// DB 히트: SQLite에서 꺼낸 타일 즉시 응답
+
+// ─────────────────────────────────────────────────────────────────────────────
+// onTileFound()
+// TileCache가 SQLite에서 타일을 찾았을 때 호출된다.
+// 소켓이 아직 연결 중이면 즉시 타일 데이터를 응답한다.
+// ─────────────────────────────────────────────────────────────────────────────
 void TileServer::onTileFound(QPointer<QTcpSocket> socket, const QByteArray& data)
 {
     if (socket && socket->state() == QAbstractSocket::ConnectedState)
         sendTile(socket, data);
 }
 
-// DB 미스: CartoDB에서 다운로드 후 SQLite 저장
+
+// ─────────────────────────────────────────────────────────────────────────────
+// onTileMissed()
+// TileCache가 SQLite에서 타일을 찾지 못했을 때 호출된다.
+// fetchAndCache()로 원격 서버에서 다운로드를 시작한다.
+// ─────────────────────────────────────────────────────────────────────────────
 void TileServer::onTileMissed(QPointer<QTcpSocket> socket, const QString& key, const QString& url)
 {
     fetchAndCache(socket, key, url);
 }
 
-// CartoDB HTTP 요청 (비동기) → 완료 시 SQLite 저장 + Qt Location에 응답
+
+// ─────────────────────────────────────────────────────────────────────────────
+// fetchAndCache()
+// 원격 타일 서버에 HTTP GET 요청을 보낸다(비동기).
+// 응답이 오면 SQLite에 저장(이후 요청은 캐시 히트)하고 클라이언트 소켓에 응답한다.
+// QPointer를 사용해 응답 도착 전에 소켓이 닫혀도 안전하게 처리한다.
+// ─────────────────────────────────────────────────────────────────────────────
 void TileServer::fetchAndCache(QPointer<QTcpSocket> socket, const QString& key, const QString& url)
 {
     QNetworkRequest req(url);
-    req.setHeader(QNetworkRequest::UserAgentHeader,
-                  "HolyUUV_GCS/1.0");
+    req.setHeader(QNetworkRequest::UserAgentHeader, "HolyUUV_GCS/1.0");
 
-    QNetworkReply* reply = _nam.get(req);  // 논블로킹, 완료되면 finished 신호
+    QNetworkReply* reply = _nam.get(req);
 
-    // QPointer: 소켓이 먼저 삭제돼도 null 체크로 안전하게 처리
     connect(reply, &QNetworkReply::finished, this, [this, reply, socket, key]() {
         reply->deleteLater();
 
@@ -150,14 +197,19 @@ void TileServer::fetchAndCache(QPointer<QTcpSocket> socket, const QString& key, 
         }
 
         QByteArray data = reply->readAll();
-        _cache->store(key, data);  // 워커 스레드에서 비동기 저장
+        _cache->store(key, data);
 
         if (socket && socket->state() == QAbstractSocket::ConnectedState)
             sendTile(socket, data);
     });
 }
 
-// HTTP 200 응답 조립 후 전송
+
+// ─────────────────────────────────────────────────────────────────────────────
+// sendTile()
+// HTTP 200 응답을 조립해 소켓으로 전송한다.
+// 전송 후 연결을 끊는다(Connection: close).
+// ─────────────────────────────────────────────────────────────────────────────
 void TileServer::sendTile(QTcpSocket* socket, const QByteArray& data)
 {
     QByteArray response;
@@ -173,7 +225,12 @@ void TileServer::sendTile(QTcpSocket* socket, const QByteArray& data)
     socket->disconnectFromHost();
 }
 
-// HTTP 404 응답 전송
+
+// ─────────────────────────────────────────────────────────────────────────────
+// sendNotFound()
+// HTTP 404 응답을 전송한다.
+// 요청 경로가 잘못됐거나 원격 다운로드에 실패했을 때 호출된다.
+// ─────────────────────────────────────────────────────────────────────────────
 void TileServer::sendNotFound(QTcpSocket* socket)
 {
     QByteArray response =
