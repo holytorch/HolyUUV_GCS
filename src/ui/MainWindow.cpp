@@ -16,7 +16,7 @@ MainWindow::MainWindow(VehicleState* state, QWidget* parent)
     : QMainWindow(parent), _state(state)
 {
     setWindowTitle("HolyUUV GCS");
-    resize(1100, 650);
+    resize(1280, 720);
     _setupUi();
 
     connect(_state, &VehicleState::batteryChanged,  this, &MainWindow::onBatteryChanged);
