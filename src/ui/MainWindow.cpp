@@ -88,6 +88,10 @@ void MainWindow::_setupUi()
     root->addStretch();
     tabs->addTab(statusTab, "Status");
 
+    // ── HUD 탭 ───────────────────────────────────────────────
+    _hudWidget = new HudWidget(_state);
+    tabs->addTab(_hudWidget, "HUD");
+
     // ── OSM 맵 탭 ────────────────────────────────────────────
     _mapBridge.initCacheDir();
 
@@ -104,16 +108,15 @@ void MainWindow::_setupUi()
     _positronWidget->setResizeMode(QQuickWidget::SizeRootObjectToView);
     tabs->addTab(_positronWidget, "Voyager");
 
+    // ── Joystick 탭 ───────────────────────────────────────────
+    _joystickWidget = new JoystickWidget();
+    tabs->addTab(_joystickWidget, "Joystick");
+
     // ── 3D Terrain 탭 ─────────────────────────────────────────
     _terrainWidget = new TerrainWidget();
     tabs->addTab(_terrainWidget, "3D Terrain");
-
-    // 3D 탭 전환 시 OSM 맵 현재 중심으로 지형 자동 로드
-    connect(tabs, &QTabWidget::currentChanged, [this, tabs](int) {
-        if (tabs->currentWidget() == _terrainWidget)
-            _terrainWidget->loadTile(_mapBridge.mapCenterLat(), _mapBridge.mapCenterLon(),
-                                     _terrainWidget->currentZoom());
-    });
+    // 자동 로드 제거 — 탭 전환마다 fetch가 겹치면서 무한 트리거 버그 발생.
+    // 사용자가 명시적으로 "Load Terrain" 버튼을 눌렀을 때만 로드한다.
 
     setCentralWidget(tabs);
 }
@@ -151,7 +154,8 @@ void MainWindow::onAttitudeChanged()
 // ─────────────────────────────────────────────────────────────────────────────
 void MainWindow::onVfrHudChanged()
 {
-    _labelDepth   ->setText(QString("%1 m").arg(-_state->depth(), 0, 'f', 2));
+    // depth는 VFR_HUD altitude 그대로 — 수중에서 음수로 표시 (예: -5.32 m).
+    _labelDepth   ->setText(QString("%1 m").arg(_state->depth(), 0, 'f', 2));
     _labelSpeed   ->setText(QString("%1 m/s").arg(_state->groundspeed(), 0, 'f', 1));
     _labelHeading ->setText(QString("%1°").arg(_state->heading(), 0, 'f', 0));
     _labelThrottle->setText(QString("%1%").arg(_state->throttle()));

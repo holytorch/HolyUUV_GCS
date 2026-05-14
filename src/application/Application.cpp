@@ -2,6 +2,7 @@
 #include "comm/UdpLink.h"
 #include "comm/SerialLink.h"
 #include "comm/UsbBoardInfo.h"
+#include "ui/joystick/JoystickWidget.h"
 #include <QApplication>
 #include <QSerialPortInfo>
 
@@ -62,6 +63,39 @@ bool Application::initialize()
             [this](const MavlinkGpsRaw& g) {
         _vehicleState.updateGpsRaw(g.satCount, g.hdop);
     });
+    connect(&_mavlinkManager, &MavlinkManager::heartbeatReceived,
+            [this](const MavlinkHeartbeat& hb) {
+        const bool armed = (hb.baseMode & 0x80) != 0;
+        _vehicleState.updateHeartbeat(armed, hb.customMode);
+    });
+
+    // 조이스틱 → MANUAL_CONTROL 전송 파이프라인
+    connect(_mainWindow.joystickWidget(), &JoystickWidget::joystickState,
+            &_mavlinkManager, &MavlinkManager::sendManualControl);
+    connect(&_mavlinkManager, &MavlinkManager::bytesToSend,
+            [this](const QByteArray& data) { _linkManager.sendBytes(data); });
+
+    // Menu/View 버튼 → COMMAND_LONG(MAV_CMD_COMPONENT_ARM_DISARM)
+    connect(_mainWindow.joystickWidget(), &JoystickWidget::armRequested,
+            &_mavlinkManager, &MavlinkManager::sendArmDisarm);
+
+    // 조이스틱 탭의 Connect/Disconnect 버튼 처리
+    connect(_mainWindow.joystickWidget(), &JoystickWidget::connectRequested,
+            [this](const QString& host, quint16 port) {
+        UdpConfig cfg;
+        cfg.remoteHost = host;
+        cfg.remotePort = port;
+        cfg.localPort  = port;
+        _linkManager.setLink(std::make_unique<UdpLink>(cfg));
+    });
+    connect(_mainWindow.joystickWidget(), &JoystickWidget::disconnectRequested,
+            [this]() { _linkManager.removeLink(); });
+
+    // LinkManager 상태 변화를 조이스틱 탭에도 전달
+    connect(&_linkManager, &LinkManager::linkConnected,
+            _mainWindow.joystickWidget(), &JoystickWidget::onLinkConnected);
+    connect(&_linkManager, &LinkManager::linkDisconnected,
+            _mainWindow.joystickWidget(), &JoystickWidget::onLinkDisconnected);
 
     _mainWindow.show();
 
@@ -84,10 +118,7 @@ bool Application::initialize()
         qInfo("Serial port found: %s", qPrintable(mavlinkPort));
         _linkManager.setLink(std::make_unique<SerialLink>(config));
     } else {
-        UdpConfig config;
-        config.localPort = 14550;
-        qInfo("Serial port 없음 → UDP 14550");
-        _linkManager.setLink(std::make_unique<UdpLink>(config));
+        qInfo("Serial port 없음 → Joystick 탭에서 UDP 연결");
     }
 
     return true;

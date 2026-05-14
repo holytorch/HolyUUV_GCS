@@ -5,6 +5,8 @@
 #include <QQuickWidget>
 #include "vehicle/VehicleState.h"
 #include "ui/MapBridge.h"
+#include "ui/HudWidget.h"
+#include "ui/joystick/JoystickWidget.h"
 #include "terrain/TerrainWidget.h"
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -55,8 +57,13 @@ private:
     QLabel* _labelHdop     = nullptr;
     QLabel* _labelLatLon   = nullptr;
 
-    MapBridge      _mapBridge;
-    QQuickWidget*  _mapWidget      = nullptr;
-    QQuickWidget*  _positronWidget = nullptr;
-    TerrainWidget* _terrainWidget  = nullptr;
+    MapBridge       _mapBridge;
+    HudWidget*      _hudWidget        = nullptr;
+    JoystickWidget* _joystickWidget   = nullptr;
+    QQuickWidget*   _mapWidget        = nullptr;
+    QQuickWidget*   _positronWidget   = nullptr;
+    TerrainWidget*  _terrainWidget    = nullptr;
+
+public:
+    JoystickWidget* joystickWidget() const { return _joystickWidget; }
 };

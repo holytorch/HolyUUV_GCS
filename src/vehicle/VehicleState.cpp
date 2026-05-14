@@ -1,9 +1,42 @@
 #include "VehicleState.h"
+#include <QTimer>
+
+// ArduSub flight mode 번호 → 문자열 테이블
+// customMode 필드 값 기준 (ArduSub 4.x 기준)
+static const char* arduSubModeName(uint32_t mode)
+{
+    switch (mode) {
+        case 0:  return "Stabilize";
+        case 1:  return "Acro";
+        case 2:  return "AltHold";
+        case 3:  return "Auto";
+        case 4:  return "Guided";
+        case 7:  return "Circle";
+        case 9:  return "Surface";
+        case 16: return "PosHold";
+        case 19: return "Manual";
+        default: return "Unknown";
+    }
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // VehicleState()
+// heartbeat 감시 타이머를 생성한다. 3초 이상 heartbeat가 없으면
+// _heartbeatOk를 false로 설정하고 heartbeatStatusChanged를 발신한다.
 // ─────────────────────────────────────────────────────────────────────────────
-VehicleState::VehicleState(QObject* parent) : QObject(parent) {}
+VehicleState::VehicleState(QObject* parent) : QObject(parent)
+{
+    _watchdog = new QTimer(this);
+    _watchdog->setInterval(500);
+    connect(_watchdog, &QTimer::timeout, this, [this]() {
+        const bool ok = _heartbeatElapsed.isValid() && _heartbeatElapsed.elapsed() < 3000;
+        if (ok != _heartbeatOk) {
+            _heartbeatOk = ok;
+            emit heartbeatStatusChanged();
+        }
+    });
+    _watchdog->start();
+}
 
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -69,4 +102,33 @@ void VehicleState::updateGpsRaw(int satCount, float hdop)
     _gpsSatCount = satCount;
     _gpsHdop     = hdop;
     emit gpsChanged();
+}
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// updateHeartbeat()
+// HEARTBEAT 메시지 파싱 결과를 저장한다.
+// armed: baseMode & MAV_MODE_FLAG_SAFETY_ARMED (0x80)
+// customMode: ArduSub 비행 모드 번호 → 문자열로 변환
+// 수신마다 _heartbeatElapsed를 리셋해 watchdog가 연결 상태를 감지한다.
+// ─────────────────────────────────────────────────────────────────────────────
+void VehicleState::updateHeartbeat(bool armed, uint32_t customMode)
+{
+    _heartbeatElapsed.restart();
+
+    if (armed != _armed) {
+        _armed = armed;
+        emit armedChanged();
+    }
+
+    const QString newMode = QString::fromLatin1(arduSubModeName(customMode));
+    if (newMode != _flightMode) {
+        _flightMode = newMode;
+        emit flightModeChanged();
+    }
+
+    if (!_heartbeatOk) {
+        _heartbeatOk = true;
+        emit heartbeatStatusChanged();
+    }
 }

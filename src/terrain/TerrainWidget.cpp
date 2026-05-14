@@ -136,14 +136,10 @@ TerrainWidget::TerrainWidget(QWidget* parent)
     connect(_fetchBtn, &QPushButton::clicked, this, &TerrainWidget::onFetchClicked);
     connect(&_nam, &QNetworkAccessManager::finished, this, &TerrainWidget::onReplyFinished);
 
-    _modeBtn = new QPushButton("Light Mode", this);
-    connect(_modeBtn, &QPushButton::clicked, this, &TerrainWidget::onModeToggled);
-
     QHBoxLayout* ctrlBar = new QHBoxLayout();
     ctrlBar->addWidget(new QLabel("Zoom:", this));
     ctrlBar->addWidget(_zoomSpin);
     ctrlBar->addWidget(_fetchBtn);
-    ctrlBar->addWidget(_modeBtn);
     ctrlBar->addStretch();
     ctrlBar->addWidget(_statusLabel);
 
@@ -197,14 +193,18 @@ void TerrainWidget::loadTile(double lat, double lon, int zoom)
 // ─────────────────────────────────────────────────────────────────────────────
 void TerrainWidget::updateVehiclePosition(double lat, double lon)
 {
-    bool firstFix = (_vehicleLat == 0.0 && _vehicleLon == 0.0);
+    // GPS 미lock 상태(SITL이 0,0을 계속 보냄)에서는 아무것도 안 한다.
+    if (lat == 0.0 && lon == 0.0) return;
+
     _vehicleLat = lat;
     _vehicleLon = lon;
 
-    if (firstFix)
-        loadTile(lat, lon, _zoom);
-    else
+    if (!_firstFixReceived) {
+        _firstFixReceived = true;
+        loadTile(lat, lon, _zoom);   // 첫 유효 fix에서만 1회 fetch
+    } else {
         updateVehicleMarker();
+    }
 }
 
 
@@ -460,19 +460,17 @@ void TerrainWidget::stitchAndBuild()
         }
     }
 
-    // 스티칭 이미지를 임시 PNG로 저장 (Qt3D QTextureImage는 파일 경로로 로드)
+    // dark_all 스티칭 이미지를 임시 PNG로 저장 (Qt3D QTextureImage는 파일 경로로 로드)
+    // Voyager 스티칭(lightStitched)은 수역 마스크 판별에만 쓰고 저장하지 않는다.
     static int seq = 0;
     ++seq;
-    _darkTexPath  = QString("%1/holyuuv_dark_%2.png").arg(QDir::tempPath()).arg(seq);
-    _lightTexPath = QString("%1/holyuuv_light_%2.png").arg(QDir::tempPath()).arg(seq);
+    _darkTexPath = QString("%1/holyuuv_dark_%2.png").arg(QDir::tempPath()).arg(seq);
 
-    bool darkSaved  = darkStitched.save(_darkTexPath);
-    bool lightSaved = lightStitched.save(_lightTexPath);
-    qInfo("텍스처 저장: dark=%s (%s) light=%s (%s)",
-          darkSaved  ? "OK" : "FAIL", qPrintable(_darkTexPath),
-          lightSaved ? "OK" : "FAIL", qPrintable(_lightTexPath));
+    bool darkSaved = darkStitched.save(_darkTexPath);
+    qInfo("텍스처 저장: dark=%s (%s)",
+          darkSaved ? "OK" : "FAIL", qPrintable(_darkTexPath));
 
-    _osmTexPath = _isDarkMode ? _darkTexPath : _lightTexPath;
+    _osmTexPath = _darkTexPath;
 
     buildMesh();
     updateVehicleMarker();
@@ -486,24 +484,6 @@ void TerrainWidget::stitchAndBuild()
             .arg(_lon, 0, 'f', 5)
             .arg(subW).arg(subH)
             .arg(metersPerPixel(_lat, _zoom), 0, 'f', 1));
-}
-
-
-// ─────────────────────────────────────────────────────────────────────────────
-// onModeToggled()
-// 다크/라이트 모드 토글 버튼 클릭 처리.
-// 텍스처 경로만 교체하고 buildMesh()를 다시 호출한다 (타일 재다운로드 없음).
-// ─────────────────────────────────────────────────────────────────────────────
-void TerrainWidget::onModeToggled()
-{
-    _isDarkMode = !_isDarkMode;
-    _modeBtn->setText(_isDarkMode ? "Light Mode" : "Dark Mode");
-
-    if (_darkTexPath.isEmpty() || _lightTexPath.isEmpty()) return;
-
-    _osmTexPath = _isDarkMode ? _darkTexPath : _lightTexPath;
-    buildMesh();
-    updateVehicleMarker();
 }
 
 
@@ -527,10 +507,9 @@ void TerrainWidget::buildMesh()
     }
 
     const TerrainTile& tile = _currentTile;
-    const int   subW        = tile.width;
-    const int   subH        = tile.height;
-    const float scale       = _worldHalfSize / static_cast<float>(_subHalfPx);
-    const float heightScale = 0.05f;
+    const int   subW  = tile.width;
+    const int   subH  = tile.height;
+    const float scale = _worldHalfSize / static_cast<float>(_subHalfPx);
 
     const float texW  = static_cast<float>(_osmTNX * 256);
     const float texH  = static_cast<float>(_osmTNY * 256);
@@ -545,7 +524,7 @@ void TerrainWidget::buildMesh()
             float h = tile.heightAt(sc, sr);
 
             *vp++ = (sc - _subHalfPx) * scale;
-            *vp++ = h * heightScale;
+            *vp++ = h * _heightScale;
             *vp++ = (sr - _subHalfPx) * scale;
 
             // per-vertex 법선: 인접 정점 높이차의 교차곱
@@ -553,8 +532,8 @@ void TerrainWidget::buildMesh()
             int sr0 = std::max(0, sr - 1), sr1 = std::min(subH - 1, sr + 1);
             float dx   = (sc1 - sc0) * scale;
             float dz   = (sr1 - sr0) * scale;
-            float dy_x = (tile.heightAt(sc1, sr) - tile.heightAt(sc0, sr)) * heightScale;
-            float dy_z = (tile.heightAt(sc, sr1) - tile.heightAt(sc, sr0)) * heightScale;
+            float dy_x = (tile.heightAt(sc1, sr) - tile.heightAt(sc0, sr)) * _heightScale;
+            float dy_z = (tile.heightAt(sc, sr1) - tile.heightAt(sc, sr0)) * _heightScale;
             float nx = -dy_x * dz;
             float ny =  dx * dz;
             float nz = -dy_z * dx;
@@ -636,64 +615,81 @@ void TerrainWidget::buildMesh()
 
 
 // ─────────────────────────────────────────────────────────────────────────────
+// _latLonToWorld()
+// 위경도를 현재 mesh의 월드 좌표로 변환한다.
+// 흐름: lat/lon → Web Mercator 픽셀(global) → stitching 이미지 내 오프셋(rel)
+//      → 픽셀-월드 스케일 적용
+// 차량 위치 마커(updateVehicleMarker)와 카메라 타겟(resetCameraToTerrain)에서 공통 사용.
+// ─────────────────────────────────────────────────────────────────────────────
+TerrainWidget::WorldPos TerrainWidget::_latLonToWorld(double lat, double lon) const
+{
+    WorldPos out;
+
+    const double fracX = (lon + 180.0) / 360.0 * (1 << _zoom);
+    const double latR  = lat * M_PI / 180.0;
+    const double fracY = (1.0 - std::log(std::tan(latR) + 1.0 / std::cos(latR)) / M_PI)
+                         / 2.0 * (1 << _zoom);
+    const double relX  = (fracX * 256 - _osmTX0 * 256) - _stitchCX;
+    const double relY  = (fracY * 256 - _osmTY0 * 256) - _stitchCY;
+
+    out.inBounds = (std::abs(relX) <= _subHalfPx && std::abs(relY) <= _subHalfPx);
+    if (!out.inBounds) return out;
+
+    const float scale = _worldHalfSize / static_cast<float>(_subHalfPx);
+    const int   sc    = static_cast<int>(relX + _subHalfPx);
+    const int   sr    = static_cast<int>(relY + _subHalfPx);
+
+    out.x        = static_cast<float>(relX) * scale;
+    out.z        = static_cast<float>(relY) * scale;
+    out.terrainH = _currentTile.heightAt(sc, sr);
+    return out;
+}
+
+
+// ─────────────────────────────────────────────────────────────────────────────
 // updateVehicleMarker()
 // 차량 위경도를 3D 월드 좌표로 변환해 빨간 구체 마커를 배치한다.
-// 차량이 현재 맵 서브영역 밖에 있으면 마커를 표시하지 않는다.
+// 마커는 1회만 생성하고 이후 transform만 갱신 → flicker 없음.
+// 메시 범위 밖이면 setEnabled(false)로 숨김 (entity는 유지).
 // ─────────────────────────────────────────────────────────────────────────────
 void TerrainWidget::updateVehicleMarker()
 {
     if (_vehicleLat == 0.0 && _vehicleLon == 0.0) return;
     if (!_currentTile.isValid()) return;
 
-    if (_vehicleMarker) {
-        _vehicleMarker->setParent(static_cast<Qt3DCore::QNode*>(nullptr));
-        delete _vehicleMarker;
-        _vehicleMarker = nullptr;
+    const WorldPos p = _latLonToWorld(_vehicleLat, _vehicleLon);
+
+    // 수중 차량은 해수면(Y=0) 기준 위에 표시.
+    // terrainH*scale을 그대로 쓰면 수역에서 SEA_DEPTH(-1000)*0.05 = -50으로 바닥에 박힘.
+    // max로 해수면 아래로 안 내려가게 막고, +5 offset으로 sphere(r=5)이 표면 위에 보이도록.
+    const float yPos = p.inBounds
+        ? std::max(p.terrainH * _heightScale, 0.0f) + 5.0f
+        : 0.0f;
+
+    // 마커 entity는 1회만 생성. 이후 transform만 갱신.
+    if (!_vehicleMarker) {
+        _vehicleMarker = new Qt3DCore::QEntity(_rootEntity);
+
+        auto* sphere = new Qt3DExtras::QSphereMesh(_vehicleMarker);
+        sphere->setRadius(5.0f);
+        sphere->setRings(12);
+        sphere->setSlices(12);
+
+        auto* mat = new Qt3DExtras::QPhongMaterial(_vehicleMarker);
+        mat->setAmbient(QColor(200, 20, 20));
+        mat->setDiffuse(QColor(255, 60, 60));
+        mat->setSpecular(QColor(255, 200, 200));
+        mat->setShininess(60.0f);
+
+        _vehicleXform = new Qt3DCore::QTransform();
+
+        _vehicleMarker->addComponent(sphere);
+        _vehicleMarker->addComponent(mat);
+        _vehicleMarker->addComponent(_vehicleXform);
     }
 
-    double fracX = (_vehicleLon + 180.0) / 360.0 * (1 << _zoom);
-    double latR  = _vehicleLat * M_PI / 180.0;
-    double fracY = (1.0 - std::log(std::tan(latR) + 1.0 / std::cos(latR)) / M_PI)
-                   / 2.0 * (1 << _zoom);
-    double gVX = fracX * 256;
-    double gVY = fracY * 256;
-
-    double sVX = gVX - _osmTX0 * 256;
-    double sVY = gVY - _osmTY0 * 256;
-
-    double relX = sVX - _stitchCX;
-    double relY = sVY - _stitchCY;
-
-    if (std::abs(relX) > _subHalfPx || std::abs(relY) > _subHalfPx) return;
-
-    const float scale       = _worldHalfSize / static_cast<float>(_subHalfPx);
-    const float heightScale = 0.05f;
-
-    int   sc   = static_cast<int>(relX + _subHalfPx);
-    int   sr   = static_cast<int>(relY + _subHalfPx);
-    float h    = _currentTile.heightAt(sc, sr);
-    float xPos = static_cast<float>(relX) * scale;
-    float zPos = static_cast<float>(relY) * scale;
-    float yPos = h * heightScale + 8.0f;
-
-    _vehicleMarker = new Qt3DCore::QEntity(_rootEntity);
-    auto* sphere = new Qt3DExtras::QSphereMesh(_vehicleMarker);
-    sphere->setRadius(5.0f);
-    sphere->setRings(8);
-    sphere->setSlices(8);
-
-    auto* mat = new Qt3DExtras::QPhongMaterial(_vehicleMarker);
-    mat->setAmbient(QColor(200, 20, 20));
-    mat->setDiffuse(QColor(255, 60, 60));
-    mat->setSpecular(QColor(255, 200, 200));
-    mat->setShininess(60.0f);
-
-    auto* t = new Qt3DCore::QTransform();
-    t->setTranslation(QVector3D(xPos, yPos, zPos));
-
-    _vehicleMarker->addComponent(sphere);
-    _vehicleMarker->addComponent(mat);
-    _vehicleMarker->addComponent(t);
+    _vehicleXform->setTranslation(QVector3D(p.x, yPos, p.z));
+    _vehicleMarker->setEnabled(p.inBounds);
 }
 
 
@@ -714,22 +710,9 @@ void TerrainWidget::resetCameraToTerrain()
     QVector3D target(0.0f, 0.0f, 0.0f);
 
     if (_vehicleMarker && _currentTile.isValid()) {
-        double fracX = (_vehicleLon + 180.0) / 360.0 * (1 << _zoom);
-        double latR  = _vehicleLat * M_PI / 180.0;
-        double fracY = (1.0 - std::log(std::tan(latR) + 1.0 / std::cos(latR)) / M_PI)
-                       / 2.0 * (1 << _zoom);
-        double relX  = (fracX * 256 - _osmTX0 * 256) - _stitchCX;
-        double relY  = (fracY * 256 - _osmTY0 * 256) - _stitchCY;
-
-        const float scale       = _worldHalfSize / static_cast<float>(_subHalfPx);
-        const float heightScale = 0.05f;
-        int   sc = static_cast<int>(relX + _subHalfPx);
-        int   sr = static_cast<int>(relY + _subHalfPx);
-        float h  = _currentTile.heightAt(sc, sr);
-
-        target = QVector3D(static_cast<float>(relX) * scale,
-                           h * heightScale,
-                           static_cast<float>(relY) * scale);
+        const WorldPos p = _latLonToWorld(_vehicleLat, _vehicleLon);
+        if (p.inBounds)
+            target = QVector3D(p.x, p.terrainH * _heightScale, p.z);
     }
 
     float mpp          = static_cast<float>(metersPerPixel(_lat, _zoom));

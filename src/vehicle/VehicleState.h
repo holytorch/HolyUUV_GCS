@@ -1,17 +1,21 @@
 #pragma once
 
 #include <QObject>
+#include <QTimer>
+#include <QElapsedTimer>
+#include <QString>
 
 // ─────────────────────────────────────────────────────────────────────────────
 // VehicleState
 // MAVLink 메시지에서 파싱된 모든 차량 텔레메트리를 저장하고 변경 알림을 발신한다.
-// MavlinkManager가 update*() 슬롯을 호출하고, MainWindow가 변경 신호를 받아 UI를 갱신한다.
+// MavlinkManager가 update*() 슬롯을 호출하고, MainWindow/HudWidget이 신호를 받아 UI를 갱신한다.
 //
 // 데이터 그룹:
-//   배터리 — SYS_STATUS 메시지
-//   자세   — ATTITUDE 메시지 (rad)
-//   항법   — VFR_HUD 메시지 (altitude = 수심, 음수)
-//   GPS    — GLOBAL_POSITION_INT + GPS_RAW_INT 메시지
+//   배터리   — SYS_STATUS 메시지
+//   자세     — ATTITUDE 메시지 (rad)
+//   항법     — VFR_HUD 메시지 (altitude = 수심, 음수)
+//   GPS      — GLOBAL_POSITION_INT + GPS_RAW_INT 메시지
+//   비행상태 — HEARTBEAT 메시지 (armed, 비행모드, 연결 감시)
 // ─────────────────────────────────────────────────────────────────────────────
 class VehicleState : public QObject {
     Q_OBJECT
@@ -36,18 +40,26 @@ public:
     int    gpsSatCount()      const { return _gpsSatCount; }
     float  gpsHdop()          const { return _gpsHdop; }
 
+    bool    armed()           const { return _armed; }
+    QString flightMode()      const { return _flightMode; }
+    bool    heartbeatOk()     const { return _heartbeatOk; }
+
 public slots:
     void updateBattery(int remaining, float voltage, float current);
     void updateAttitude(float roll, float pitch, float yaw);
     void updateVfrHud(float groundspeed, float depth, float heading, int throttle);
     void updateGlobalPosition(double lat, double lon);
     void updateGpsRaw(int satCount, float hdop);
+    void updateHeartbeat(bool armed, uint32_t customMode);
 
 signals:
     void batteryChanged();
     void attitudeChanged();
     void vfrHudChanged();
     void gpsChanged();
+    void armedChanged();
+    void flightModeChanged();
+    void heartbeatStatusChanged();
 
 private:
     int    _batteryRemaining = -1;
@@ -67,4 +79,10 @@ private:
     double _longitude        = 0.0;
     int    _gpsSatCount      = 0;
     float  _gpsHdop          = 99.9f;
+
+    bool    _armed           = false;
+    QString _flightMode      = "Unknown";
+    bool    _heartbeatOk     = false;
+    QTimer* _watchdog        = nullptr;
+    QElapsedTimer _heartbeatElapsed;
 };

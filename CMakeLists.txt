@@ -51,6 +51,12 @@ SET(SOURCES
     src/comm/TcpLink.cpp
     src/mavlink/MavlinkManager.cpp
     src/ui/MapBridge.cpp
+    src/ui/HudWidget.cpp
+    src/ui/hud/AttitudeIndicator.cpp
+    src/ui/hud/CompassWidget.cpp
+    src/ui/hud/DepthGauge.cpp
+    src/ui/joystick/StickPad.cpp
+    src/ui/joystick/JoystickWidget.cpp
     src/map/TileCache.cpp
     src/map/TileCacheWorker.cpp
     src/map/TileServer.cpp
@@ -67,6 +73,7 @@ ADD_EXECUTABLE(${PROJECT_NAME} ${SOURCES} ${RESOURCES})
 TARGET_INCLUDE_DIRECTORIES(${PROJECT_NAME} PRIVATE
     src
     src/terrain
+    src/ui/joystick
 )
 
 # MAVLink은 서드파티 헤더라 경고 억제

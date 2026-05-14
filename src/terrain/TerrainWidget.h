@@ -9,7 +9,7 @@
 #include <QMap>
 #include "TerrainTile.h"
 
-namespace Qt3DCore   { class QEntity; class QNode; }
+namespace Qt3DCore   { class QEntity; class QNode; class QTransform; }
 namespace Qt3DExtras {
     class Qt3DWindow;
     class QOrbitCameraController;
@@ -51,7 +51,6 @@ protected:
 private slots:
     void onFetchClicked();
     void onReplyFinished(QNetworkReply* reply);
-    void onModeToggled();
 
 private:
     // Web Mercator 좌표 변환 유틸
@@ -64,6 +63,15 @@ private:
     void handleVoyagerTile(QNetworkReply* reply);
     void stitchAndBuild();
 
+    // 위경도 → 현재 mesh 월드 좌표 변환 결과
+    struct WorldPos {
+        bool  inBounds = false;
+        float x        = 0.0f;   // 월드 X (동쪽 +)
+        float z        = 0.0f;   // 월드 Z (남쪽 +)
+        float terrainH = 0.0f;   // _currentTile.heightAt() 원시값 (스케일 미적용)
+    };
+    WorldPos _latLonToWorld(double lat, double lon) const;
+
     // Qt3D 씬
     void buildMesh();
     void updateVehicleMarker();
@@ -74,13 +82,13 @@ private:
     QLabel*      _statusLabel = nullptr;
     QSpinBox*    _zoomSpin    = nullptr;
     QPushButton* _fetchBtn    = nullptr;
-    QPushButton* _modeBtn     = nullptr;
 
     // Qt3D 씬 트리
     Qt3DExtras::Qt3DWindow*             _view          = nullptr;
     Qt3DCore::QEntity*                  _rootEntity    = nullptr;
     Qt3DCore::QEntity*                  _meshEntity    = nullptr;
     Qt3DCore::QEntity*                  _vehicleMarker = nullptr;
+    Qt3DCore::QTransform*               _vehicleXform  = nullptr;  // 캐시: 매 GPS마다 재생성 안 함
     Qt3DExtras::QOrbitCameraController* _camCtrl       = nullptr;
 
     // 네트워크
@@ -107,13 +115,19 @@ private:
 
     // 렌더링 데이터
     TerrainTile _currentTile;
-    bool        _isDarkMode  = true;    // true = dark_all 텍스처, false = Voyager 텍스처
     QString     _darkTexPath;           // dark_all 스티칭 PNG 임시 경로
-    QString     _lightTexPath;          // Voyager 스티칭 PNG 임시 경로
     QString     _osmTexPath;            // buildMesh()가 현재 사용하는 텍스처 경로
-    static constexpr float _worldHalfSize = 128.0f;
+
+    // 월드 좌표 스케일 상수
+    static constexpr float _worldHalfSize = 128.0f;  // 메시 반폭 (월드 유닛)
+    static constexpr float _heightScale   = 0.05f;   // 픽셀 높이값 → 월드 Y 스케일
 
     // 차량 위경도
     double _vehicleLat = 0.0;
     double _vehicleLon = 0.0;
+
+    // 첫 유효 GPS fix 수신 여부.
+    // _vehicleLat/Lon이 0.0인 것만으로 첫 fix를 판단하면, SITL이 lock 전
+    // (0,0)을 계속 보낼 때마다 loadTile이 재호출돼 무한 fetch 루프 발생.
+    bool _firstFixReceived = false;
 };

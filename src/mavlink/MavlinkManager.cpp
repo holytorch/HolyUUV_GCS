@@ -26,13 +26,35 @@ void MavlinkManager::parseBytes(const QByteArray& data)
                 case MAVLINK_MSG_ID_HEARTBEAT: {
                     mavlink_heartbeat_t hb;
                     mavlink_msg_heartbeat_decode(&_message, &hb);
-                    MavlinkHeartbeat out;
-                    out.type         = hb.type;
-                    out.autopilot    = hb.autopilot;
-                    out.baseMode     = hb.base_mode;
-                    out.customMode   = hb.custom_mode;
-                    out.systemStatus = hb.system_status;
-                    emit heartbeatReceived(out);
+
+                    const bool isAutopilot = (hb.autopilot != MAV_AUTOPILOT_INVALID);
+
+                    // 첫 autopilot HEARTBEAT에서만 target latch (이후 다른 sysid로 안 바뀜).
+                    // mavlink-router 같은 중계기가 자기 HEARTBEAT를 끼워보내도
+                    // autopilot이 아니면 무시.
+                    if (isAutopilot && !_loggedFirstHeartbeat) {
+                        _targetSysid       = _message.sysid;
+                        _targetCompid      = _message.compid;
+                        _loggedFirstHeartbeat = true;
+                        LOG_INFO("First HEARTBEAT (autopilot): sysid=%d compid=%d type=%d base=0x%02X custom=%u → target locked",
+                                 _targetSysid, _targetCompid,
+                                 hb.type, hb.base_mode, hb.custom_mode);
+                    }
+
+                    // VehicleState로는 latch된 target의 HEARTBEAT만 전달.
+                    // 중계기 heartbeat(armed=0)와 autopilot heartbeat(armed=1)이
+                    // 번갈아 도착하면 ARMED/DISARMED 깜빡임 발생 → 여기서 차단.
+                    if (_loggedFirstHeartbeat &&
+                        _message.sysid  == _targetSysid &&
+                        _message.compid == _targetCompid) {
+                        MavlinkHeartbeat out;
+                        out.type         = hb.type;
+                        out.autopilot    = hb.autopilot;
+                        out.baseMode     = hb.base_mode;
+                        out.customMode   = hb.custom_mode;
+                        out.systemStatus = hb.system_status;
+                        emit heartbeatReceived(out);
+                    }
                     break;
                 }
 
@@ -96,6 +118,21 @@ void MavlinkManager::parseBytes(const QByteArray& data)
                     break;
                 }
 
+                case MAVLINK_MSG_ID_COMMAND_ACK: {
+                    mavlink_command_ack_t ack;
+                    mavlink_msg_command_ack_decode(&_message, &ack);
+                    const char* resStr =
+                        ack.result == MAV_RESULT_ACCEPTED            ? "ACCEPTED" :
+                        ack.result == MAV_RESULT_TEMPORARILY_REJECTED ? "TEMP_REJECTED" :
+                        ack.result == MAV_RESULT_DENIED              ? "DENIED" :
+                        ack.result == MAV_RESULT_UNSUPPORTED         ? "UNSUPPORTED" :
+                        ack.result == MAV_RESULT_FAILED              ? "FAILED" :
+                        ack.result == MAV_RESULT_IN_PROGRESS         ? "IN_PROGRESS" : "?";
+                    LOG_INFO("COMMAND_ACK: cmd=%u result=%u (%s)",
+                             ack.command, ack.result, resStr);
+                    break;
+                }
+
                 case MAVLINK_MSG_ID_GPS_RAW_INT: {
                     mavlink_gps_raw_int_t gps;
                     mavlink_msg_gps_raw_int_decode(&_message, &gps);
@@ -113,5 +150,83 @@ void MavlinkManager::parseBytes(const QByteArray& data)
     }
 #else
     Q_UNUSED(data)
+#endif
+}
+
+
+#ifdef MAVLINK_AVAILABLE
+// ─────────────────────────────────────────────────────────────────────────────
+// _emitMessage()
+// 빌드된 mavlink_message_t를 바이트 버퍼로 직렬화해 bytesToSend로 발신한다.
+// 모든 송신 함수(sendArmDisarm, sendManualControl, ...)가 공유.
+// ─────────────────────────────────────────────────────────────────────────────
+void MavlinkManager::_emitMessage(mavlink_message_t& msg)
+{
+    uint8_t buf[MAVLINK_MAX_PACKET_LEN];
+    const uint16_t len = mavlink_msg_to_send_buffer(buf, &msg);
+    emit bytesToSend(QByteArray(reinterpret_cast<const char*>(buf),
+                                static_cast<int>(len)));
+}
+#endif
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// sendArmDisarm()
+// MAV_CMD_COMPONENT_ARM_DISARM (cmd=400)을 COMMAND_LONG으로 송신한다.
+// QGC와 동일한 방식 — MANUAL_CONTROL 비트마스크는 BTN_n_FUNCTION 매핑이 필요하지만,
+// COMMAND_LONG은 ArduSub이 무조건 처리한다.
+//
+//   param1: 1.0 = arm,  0.0 = disarm
+//   param2: 0     = 안전체크 통과 후 무장,  21196 = 강제(force)
+// ─────────────────────────────────────────────────────────────────────────────
+void MavlinkManager::sendArmDisarm(bool arm)
+{
+#ifdef MAVLINK_AVAILABLE
+    LOG_INFO("Send ARM_DISARM → target %d:%d : %s",
+             _targetSysid, _targetCompid, arm ? "ARM" : "DISARM");
+
+    mavlink_message_t msg;
+    mavlink_msg_command_long_pack(
+        255, 0, &msg,                     // GCS sysid, compid
+        _targetSysid, _targetCompid,      // target = HEARTBEAT에서 latch된 값
+        MAV_CMD_COMPONENT_ARM_DISARM,
+        0,                                // confirmation
+        arm ? 1.0f : 0.0f,                // param1
+        0, 0, 0, 0, 0, 0                  // param2~7 unused
+    );
+    _emitMessage(msg);
+#else
+    Q_UNUSED(arm);
+#endif
+}
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// sendManualControl()
+// MAVLink MANUAL_CONTROL 패킷을 빌드하고 bytesToSend 신호로 발신한다.
+// target은 HEARTBEAT에서 latch된 값 사용. 50 Hz로 호출됨.
+// x/y/r: [-1000, 1000], z: [0, 1000] (500=중립)
+// ─────────────────────────────────────────────────────────────────────────────
+void MavlinkManager::sendManualControl(int16_t x, int16_t y, int16_t z,
+                                        int16_t r, uint16_t buttons)
+{
+#ifdef MAVLINK_AVAILABLE
+    if (!_loggedFirstManualControl) {
+        _loggedFirstManualControl = true;
+        LOG_INFO("First MANUAL_CONTROL → target sysid=%d  x=%d y=%d z=%d r=%d btns=0x%04X",
+                 _targetSysid, x, y, z, r, buttons);
+    }
+
+    mavlink_message_t msg;
+    // buttons2/enabled_extensions/aux1~6/s/t: 사용하지 않으므로 0
+    mavlink_msg_manual_control_pack(255, 0, &msg,
+                                    _targetSysid,
+                                    x, y, z, r,
+                                    buttons,
+                                    0, 0,                  // buttons2, enabled_extensions
+                                    0, 0, 0, 0, 0, 0, 0, 0); // s, t, aux1~6
+    _emitMessage(msg);
+#else
+    Q_UNUSED(x); Q_UNUSED(y); Q_UNUSED(z); Q_UNUSED(r); Q_UNUSED(buttons);
 #endif
 }

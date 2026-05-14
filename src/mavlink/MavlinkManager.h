@@ -74,9 +74,12 @@ public:
 
 public slots:
     void parseBytes(const QByteArray& data);
+    void sendManualControl(int16_t x, int16_t y, int16_t z, int16_t r, uint16_t buttons);
+    void sendArmDisarm(bool arm);
 
 signals:
     void heartbeatReceived(const MavlinkHeartbeat& hb);
+    void bytesToSend(const QByteArray& data);
     void attitudeReceived(const MavlinkAttitude& att);
     void sysStatusReceived(const MavlinkSysStatus& status);
     void scaledPressureReceived(const MavlinkScaledPressure& pressure);
@@ -86,7 +89,19 @@ signals:
 
 private:
 #ifdef MAVLINK_AVAILABLE
+    // 송신용 공통 헬퍼 — to_send_buffer + bytesToSend.
+    void _emitMessage(mavlink_message_t& msg);
+
     mavlink_status_t  _status  = {};
     mavlink_message_t _message = {};
 #endif
+
+    // 디버깅: 첫 HEARTBEAT / 첫 MANUAL_CONTROL 송신 로그용 (1회만)
+    bool _loggedFirstHeartbeat     = false;
+    bool _loggedFirstManualControl = false;
+
+    // 첫 autopilot HEARTBEAT에서 latch — 모든 송신의 target sysid/compid.
+    // 하드코딩 1로 두면 ArduSub이 다른 sysid일 때 명령 묵살.
+    uint8_t _targetSysid  = 1;
+    uint8_t _targetCompid = 1;
 };
