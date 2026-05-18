@@ -1,4 +1,5 @@
 #include <QApplication>
+#include <csignal>
 #include "application/Application.h"
 #include "util/log/logger.h"
 #include "info/version.h"
@@ -19,6 +20,11 @@ int main(int argc, char* argv[])
 
     // qt 라이브러리 초기화 (이후 QApplication 객체가 생성됨)
     QApplication qtApp(argc, argv);
+
+    // Ctrl+C(SIGINT) / kill(SIGTERM) 수신 시 Qt 이벤트 루프를 정상 종료
+    // → app.run() 반환 → app.shutdown() 호출로 X 버튼과 동일한 종료 경로 보장
+    signal(SIGINT,  [](int) { QApplication::quit(); });
+    signal(SIGTERM, [](int) { QApplication::quit(); });
 
     // Logger 초기화
     Logger::init();
