@@ -31,6 +31,8 @@
 class Application : public QObject {
     Q_OBJECT
 public:
+    // explicit 의도한 생성자만 허용 (예: 부모 QObject*), 암시적 변환 방지
+    //QObject : 부모, Application : 상속받은 자식
     explicit Application(QObject* parent = nullptr);
 
     bool initialize();
@@ -38,6 +40,7 @@ public:
     void shutdown();
 
 private:
+    // Application이 생성될 때, 자동으로 같이 생성자 실행됨
     LinkManager    _linkManager;
     MavlinkManager _mavlinkManager;
     VehicleState   _vehicleState;

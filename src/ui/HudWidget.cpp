@@ -83,6 +83,7 @@ HudWidget::HudWidget(VehicleState* state, QWidget* parent)
     root->addLayout(instruments);
     setLayout(root);
 
+    // VehicleState -> HUD 신호 연결
     connect(_state, &VehicleState::attitudeChanged,       this, &HudWidget::onAttitudeChanged);
     connect(_state, &VehicleState::vfrHudChanged,         this, &HudWidget::onVfrHudChanged);
     connect(_state, &VehicleState::armedChanged,          this, &HudWidget::onArmedChanged);

@@ -35,6 +35,7 @@ bool UdpLink::connectLink()
         return false;
     }
 
+    // UDP 수신 핵심 코드 (이벤트 기반 콜백)
     connect(_socket, &QUdpSocket::readyRead, this, &UdpLink::onReadyRead);
 
     _connected = true;

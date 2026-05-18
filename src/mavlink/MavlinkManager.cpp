@@ -16,11 +16,22 @@ MavlinkManager::MavlinkManager(QObject* parent) : QObject(parent) {}
 void MavlinkManager::parseBytes(const QByteArray& data)
 {
 #ifdef MAVLINK_AVAILABLE
+    // MAVLink 패킷 구조: [STX(1byte)][LEN(1)][SEQ(1)][SYS(1)][COMP(1)][MSGID(1)][PAYLOAD(LEN)][CRC(2)]
+    // 1바이트씩 파서에 공급하는 이유:
+    //   - UDP 패킷 하나에 MAVLink 메시지 여러 개가 붙어올 수 있음
+    //   - 파서가 내부 버퍼에 바이트를 쌓다가 패킷이 완성되면 true 반환
+    //   - STX(0xFD/0xFE) 로 시작점 감지, LEN 으로 끝점 계산, CRC 로 유효성 검증
     for (const char byte : data) {
+        // mavlink_parse_char: 바이트 1개를 상태머신에 공급
+        // 패킷이 완성(STX~CRC 전부 수신 + CRC 통과)되면 true 반환
+        // true 전까지는 _message에 접근하지 않고 계속 바이트를 쌓음
         if (mavlink_parse_char(MAVLINK_COMM_0,
                                static_cast<uint8_t>(byte),
                                &_message, &_status))
         {
+            // MSGID(1바이트, 0~255)로 메시지 종류 식별
+            // MSGID가 정해지면 페이로드 구조가 스펙에 고정되어 있어서
+            // mavlink_msg_xxx_decode()가 바이트 위치 기준으로 각 필드를 잘라 해석함
             switch (_message.msgid) {
 
                 case MAVLINK_MSG_ID_HEARTBEAT: {

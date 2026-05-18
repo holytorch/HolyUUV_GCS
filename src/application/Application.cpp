@@ -1,10 +1,10 @@
 #include "Application.h"
 #include "comm/UdpLink.h"
-#include "comm/SerialLink.h"
-#include "comm/UsbBoardInfo.h"
+// #include "comm/SerialLink.h"   // 실기기 대응 시 활성화
+// #include "comm/UsbBoardInfo.h" // 실기기 대응 시 활성화
 #include "ui/joystick/JoystickWidget.h"
 #include <QApplication>
-#include <QSerialPortInfo>
+// #include <QSerialPortInfo>     // 실기기 대응 시 활성화
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Application()
@@ -15,6 +15,14 @@ Application::Application(QObject* parent) : QObject(parent) {}
 // ─────────────────────────────────────────────────────────────────────────────
 // initialize()
 // 모든 하위 시스템을 연결하고 애플리케이션을 시작한다.
+//
+// 수신 데이터 흐름:
+//   ArduSub → UdpLink → MavlinkManager → VehicleState → HudWidget → 화면
+//   (패킷)    (바이트)   (파싱/분류)      (상태저장)     (렌더링)
+//
+// 송신 데이터 흐름:
+//   조이스틱 → JoystickWidget → MavlinkManager → UdpLink → ArduSub
+//   (입력)     (시그널 발신)    (패킷 조립)      (송신)
 //
 // 초기화 순서:
 //   1. TileServer 시작 (127.0.0.1:17777 리슨)
@@ -30,6 +38,7 @@ bool Application::initialize()
         return false;
     }
 
+    // ILINK -> LinkManager → MainWindow 업데이트 파이프라인
     connect(&_linkManager, &LinkManager::linkConnected,
             &_mainWindow, &MainWindow::onLinkConnected);
     connect(&_linkManager, &LinkManager::linkDisconnected,
@@ -37,10 +46,12 @@ bool Application::initialize()
     connect(&_linkManager, &LinkManager::linkError, [](const QString& msg) {
         qCritical("Link error: %s", qPrintable(msg));
     });
-
     connect(&_linkManager, &LinkManager::bytesReceived,
             &_mavlinkManager, &MavlinkManager::parseBytes);
 
+    
+
+    // MavlinkManager → VehicleState 업데이트 파이프라인
     connect(&_mavlinkManager, &MavlinkManager::sysStatusReceived,
             [this](const MavlinkSysStatus& s) {
         _vehicleState.updateBattery(s.batteryRemaining,
@@ -69,17 +80,15 @@ bool Application::initialize()
         _vehicleState.updateHeartbeat(armed, hb.customMode);
     });
 
-    // 조이스틱 → MANUAL_CONTROL 전송 파이프라인
+
+
+    // JoystickWidget → MavlinkManager → LinkManager 송신 파이프라인
     connect(_mainWindow.joystickWidget(), &JoystickWidget::joystickState,
             &_mavlinkManager, &MavlinkManager::sendManualControl);
     connect(&_mavlinkManager, &MavlinkManager::bytesToSend,
             [this](const QByteArray& data) { _linkManager.sendBytes(data); });
-
-    // Menu/View 버튼 → COMMAND_LONG(MAV_CMD_COMPONENT_ARM_DISARM)
     connect(_mainWindow.joystickWidget(), &JoystickWidget::armRequested,
             &_mavlinkManager, &MavlinkManager::sendArmDisarm);
-
-    // 조이스틱 탭의 Connect/Disconnect 버튼 처리
     connect(_mainWindow.joystickWidget(), &JoystickWidget::connectRequested,
             [this](const QString& host, quint16 port) {
         UdpConfig cfg;
@@ -91,36 +100,44 @@ bool Application::initialize()
     connect(_mainWindow.joystickWidget(), &JoystickWidget::disconnectRequested,
             [this]() { _linkManager.removeLink(); });
 
-    // LinkManager 상태 변화를 조이스틱 탭에도 전달
+
+    
+    // LinkManager → JoystickWidget 연결 상태 표시
     connect(&_linkManager, &LinkManager::linkConnected,
             _mainWindow.joystickWidget(), &JoystickWidget::onLinkConnected);
     connect(&_linkManager, &LinkManager::linkDisconnected,
             _mainWindow.joystickWidget(), &JoystickWidget::onLinkDisconnected);
 
+
+
+
+    // 시그널-슬롯 전부 연결 후에 창을 표시한다 (연결 상태 초기화 위해)
     _mainWindow.show();
 
-    QString mavlinkPort;
-    const UsbBoardInfo& boardInfo = UsbBoardInfo::instance();
-    for (const QSerialPortInfo& info : QSerialPortInfo::availablePorts()) {
-        if (boardInfo.isMavlinkBoard(info)) {
-            mavlinkPort = info.systemLocation();
-            qInfo("MAVLink board detected: %s (%s)",
-                  qPrintable(boardInfo.boardName(info)),
-                  qPrintable(mavlinkPort));
-            break;
-        }
-    }
 
-    if (!mavlinkPort.isEmpty()) {
-        SerialConfig config;
-        config.portName = mavlinkPort;
-        config.baudRate = 57600;
-        qInfo("Serial port found: %s", qPrintable(mavlinkPort));
-        _linkManager.setLink(std::make_unique<SerialLink>(config));
-    } else {
-        qInfo("Serial port 없음 → Joystick 탭에서 UDP 연결");
-    }
+    // 실기기 대응 코드 (GCS 개발 완료 후 차후 진행 예정)
+    // QString mavlinkPort;
+    // const UsbBoardInfo& boardInfo = UsbBoardInfo::instance();
+    // for (const QSerialPortInfo& info : QSerialPortInfo::availablePorts()) {
+    //     if (boardInfo.isMavlinkBoard(info)) {
+    //         mavlinkPort = info.systemLocation();
+    //         qInfo("MAVLink board detected: %s (%s)",
+    //               qPrintable(boardInfo.boardName(info)),
+    //               qPrintable(mavlinkPort));
+    //         break;
+    //     }
+    // }
+    // if (!mavlinkPort.isEmpty()) {
+    //     SerialConfig config;
+    //     config.portName = mavlinkPort;
+    //     config.baudRate = 57600;
+    //     qInfo("Serial port found: %s", qPrintable(mavlinkPort));
+    //     _linkManager.setLink(std::make_unique<SerialLink>(config));
+    // } else {
+    //     qInfo("Serial port 없음 → Joystick 탭에서 UDP 연결");
+    // }
 
+    
     return true;
 }
 
