@@ -44,12 +44,24 @@ VehicleState::VehicleState(QObject* parent) : QObject(parent)
 // SYS_STATUS 메시지 파싱 결과를 저장하고 batteryChanged를 발신한다.
 // current는 cA(센티암페어) 단위로 수신되며 표시 시 /100으로 변환한다.
 // ─────────────────────────────────────────────────────────────────────────────
-void VehicleState::updateBattery(int remaining, float voltage, float current)
+void VehicleState::updateBattery(int remaining, float voltage, float current,
+                                  uint16_t dropRate, uint16_t errorsComm)
 {
     _batteryRemaining = remaining;
     _voltage          = voltage;
     _current          = current;
+    _dropRateComm     = dropRate;
+    _errorsComm       = errorsComm;
     emit batteryChanged();
+    emit linkQualityChanged();
+}
+
+void VehicleState::updateRadioStatus(uint8_t rssi, uint8_t remRssi)
+{
+    _rssi           = rssi;
+    _remRssi        = remRssi;
+    _hasRadioStatus = true;
+    emit linkQualityChanged();
 }
 
 

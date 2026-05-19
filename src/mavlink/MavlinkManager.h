@@ -34,6 +34,16 @@ struct MavlinkSysStatus {
     uint16_t voltageBattery   = 0;    // mV
     int16_t  currentBattery   = -1;   // cA (-1 = 사용 불가)
     int8_t   batteryRemaining = -1;   // % (-1 = 사용 불가)
+    uint16_t dropRateComm     = 0;    // 패킷 손실률 % (0~10000 → /100 = %)
+    uint16_t errorsComm       = 0;    // 통신 오류 횟수
+};
+
+struct MavlinkRadioStatus {
+    uint8_t  rssi      = 0;    // 수신 신호 강도 (0~254, 255=unknown)
+    uint8_t  remRssi   = 0;    // 원격 신호 강도
+    uint8_t  noise     = 0;    // 로컬 노이즈
+    uint8_t  remNoise  = 0;    // 원격 노이즈
+    uint16_t rxErrors  = 0;    // 수신 오류 수
 };
 
 struct MavlinkScaledPressure {
@@ -86,6 +96,7 @@ signals:
     void vfrHudReceived(const MavlinkVfrHud& hud);
     void globalPositionReceived(const MavlinkGlobalPosition& pos);
     void gpsRawReceived(const MavlinkGpsRaw& gps);
+    void radioStatusReceived(const MavlinkRadioStatus& radio);
 
 private:
 #ifdef MAVLINK_AVAILABLE

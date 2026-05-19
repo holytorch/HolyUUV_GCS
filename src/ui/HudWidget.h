@@ -28,6 +28,8 @@ public slots:
     void onArmedChanged();
     void onFlightModeChanged();
     void onHeartbeatStatusChanged();
+    void onBatteryChanged();
+    void onLinkQualityChanged();
 
 private:
     VehicleState*      _state       = nullptr;
@@ -37,4 +39,6 @@ private:
     QLabel*            _lblArmed    = nullptr;
     QLabel*            _lblMode     = nullptr;
     QLabel*            _lblHb       = nullptr;
+    QLabel*            _lblBattery  = nullptr;
+    QLabel*            _lblLink     = nullptr;
 };

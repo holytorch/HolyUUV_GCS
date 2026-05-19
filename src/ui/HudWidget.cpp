@@ -42,12 +42,20 @@ HudWidget::HudWidget(VehicleState* state, QWidget* parent)
     _lblHb = new QLabel("● NO LINK", this);
     _lblHb->setStyleSheet(chipStyle(kRed));
 
+    _lblBattery = new QLabel("BAT: --%  --.--V", this);
+    _lblBattery->setStyleSheet(chipStyle(kMuted));
+
+    _lblLink = new QLabel("LINK: --%  RSSI: N/A", this);
+    _lblLink->setStyleSheet(chipStyle(kMuted));
+
     QHBoxLayout* statusBar = new QHBoxLayout();
     statusBar->setContentsMargins(0, 0, 0, 0);
     statusBar->setSpacing(8);
     statusBar->addWidget(_lblArmed);
     statusBar->addWidget(_lblMode);
     statusBar->addWidget(_lblHb);
+    statusBar->addWidget(_lblBattery);
+    statusBar->addWidget(_lblLink);
     statusBar->addStretch();
 
     // ── 계기 ──────────────────────────────────────────────────
@@ -89,6 +97,8 @@ HudWidget::HudWidget(VehicleState* state, QWidget* parent)
     connect(_state, &VehicleState::armedChanged,          this, &HudWidget::onArmedChanged);
     connect(_state, &VehicleState::flightModeChanged,     this, &HudWidget::onFlightModeChanged);
     connect(_state, &VehicleState::heartbeatStatusChanged,this, &HudWidget::onHeartbeatStatusChanged);
+    connect(_state, &VehicleState::batteryChanged,        this, &HudWidget::onBatteryChanged);
+    connect(_state, &VehicleState::linkQualityChanged,    this, &HudWidget::onLinkQualityChanged);
 }
 
 
@@ -146,4 +156,46 @@ void HudWidget::onHeartbeatStatusChanged()
     const bool ok = _state->heartbeatOk();
     _lblHb->setText(ok ? "● LINK OK" : "● NO LINK");
     _lblHb->setStyleSheet(chipStyle(ok ? kGreen : kRed));
+}
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// onBatteryChanged()
+// 배터리 잔량(%)과 전압(V)을 표시. 잔량에 따라 색 변경 (QGC 기준 참고)
+//   > 50%: 초록  /  25~50%: 주황  /  < 25%: 빨강
+// ─────────────────────────────────────────────────────────────────────────────
+void HudWidget::onLinkQualityChanged()
+{
+    const float dropPct = _state->dropRateComm() / 100.0f;  // 0~10000 → 0~100%
+
+    QString text;
+    if (_state->hasRadioStatus()) {
+        text = QString("LINK: %1%  RSSI: %2/%3")
+            .arg(dropPct, 0, 'f', 1)
+            .arg(_state->rssi())
+            .arg(_state->remRssi());
+    } else {
+        text = QString("LINK: %1%  RSSI: N/A").arg(dropPct, 0, 'f', 1);
+    }
+
+    const char* color = dropPct < 5.0f  ? kGreen
+                      : dropPct < 20.0f ? "#ffaa00"
+                      :                    kRed;
+    _lblLink->setText(text);
+    _lblLink->setStyleSheet(chipStyle(color));
+}
+
+void HudWidget::onBatteryChanged()
+{
+    const int   pct     = _state->batteryRemaining();
+    const float voltage = _state->voltage();
+
+    _lblBattery->setText(QString("BAT: %1%  %2V")
+        .arg(pct)
+        .arg(voltage, 0, 'f', 2));
+
+    const char* color = pct > 50 ? kGreen
+                      : pct > 25 ? "#ffaa00"
+                      :             kRed;
+    _lblBattery->setStyleSheet(chipStyle(color, /*bold=*/pct < 25));
 }

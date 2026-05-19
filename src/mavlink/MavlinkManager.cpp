@@ -90,7 +90,22 @@ void MavlinkManager::parseBytes(const QByteArray& data)
                     out.voltageBattery   = sys.voltage_battery;
                     out.currentBattery   = sys.current_battery;
                     out.batteryRemaining = sys.battery_remaining;
+                    out.dropRateComm     = sys.drop_rate_comm;  // SITL: 항상 0
+                    out.errorsComm       = sys.errors_comm;
                     emit sysStatusReceived(out);
+                    break;
+                }
+
+                case MAVLINK_MSG_ID_RADIO_STATUS: {
+                    mavlink_radio_status_t radio;
+                    mavlink_msg_radio_status_decode(&_message, &radio);
+                    MavlinkRadioStatus out;
+                    out.rssi     = radio.rssi;
+                    out.remRssi  = radio.remrssi;
+                    out.noise    = radio.noise;
+                    out.remNoise = radio.remnoise;
+                    out.rxErrors = radio.rxerrors;
+                    emit radioStatusReceived(out);
                     break;
                 }
 

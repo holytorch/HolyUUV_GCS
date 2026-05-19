@@ -56,7 +56,13 @@ bool Application::initialize()
             [this](const MavlinkSysStatus& s) {
         _vehicleState.updateBattery(s.batteryRemaining,
                                     s.voltageBattery / 1000.0f,
-                                    s.currentBattery);
+                                    s.currentBattery,
+                                    s.dropRateComm,
+                                    s.errorsComm);
+    });
+    connect(&_mavlinkManager, &MavlinkManager::radioStatusReceived,
+            [this](const MavlinkRadioStatus& r) {
+        _vehicleState.updateRadioStatus(r.rssi, r.remRssi);
     });
     connect(&_mavlinkManager, &MavlinkManager::attitudeReceived,
             [this](const MavlinkAttitude& a) {

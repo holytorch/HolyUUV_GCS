@@ -44,13 +44,20 @@ public:
     QString flightMode()      const { return _flightMode; }
     bool    heartbeatOk()     const { return _heartbeatOk; }
 
+    uint16_t dropRateComm()   const { return _dropRateComm; }
+    uint16_t errorsComm()     const { return _errorsComm; }
+    uint8_t  rssi()           const { return _rssi; }
+    uint8_t  remRssi()        const { return _remRssi; }
+    bool     hasRadioStatus() const { return _hasRadioStatus; }
+
 public slots:
-    void updateBattery(int remaining, float voltage, float current);
+    void updateBattery(int remaining, float voltage, float current, uint16_t dropRate, uint16_t errorsComm);
     void updateAttitude(float roll, float pitch, float yaw);
     void updateVfrHud(float groundspeed, float depth, float heading, int throttle);
     void updateGlobalPosition(double lat, double lon);
     void updateGpsRaw(int satCount, float hdop);
     void updateHeartbeat(bool armed, uint32_t customMode);
+    void updateRadioStatus(uint8_t rssi, uint8_t remRssi);
 
 signals:
     void batteryChanged();
@@ -60,6 +67,7 @@ signals:
     void armedChanged();
     void flightModeChanged();
     void heartbeatStatusChanged();
+    void linkQualityChanged();
 
 private:
     int    _batteryRemaining = -1;
@@ -85,4 +93,10 @@ private:
     bool    _heartbeatOk     = false;
     QTimer* _watchdog        = nullptr;
     QElapsedTimer _heartbeatElapsed;
+
+    uint16_t _dropRateComm   = 0;
+    uint16_t _errorsComm     = 0;
+    uint8_t  _rssi           = 0;
+    uint8_t  _remRssi        = 0;
+    bool     _hasRadioStatus = false;
 };
