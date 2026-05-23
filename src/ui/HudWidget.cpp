@@ -48,6 +48,20 @@ HudWidget::HudWidget(VehicleState* state, QWidget* parent)
     _lblLink = new QLabel("LINK: --%  RSSI: N/A", this);
     _lblLink->setStyleSheet(chipStyle(kMuted));
 
+    // 2행: Speed / Throttle / Depth / GPS
+    _lblSpeed    = new QLabel("SPD: --.- m/s", this);
+    _lblSpeed->setStyleSheet(chipStyle(kMuted));
+    _lblThrottle = new QLabel("THR: ---%", this);
+    _lblThrottle->setStyleSheet(chipStyle(kMuted));
+    _lblDepthVal = new QLabel("DEP: --.- m", this);
+    _lblDepthVal->setStyleSheet(chipStyle(kMuted));
+    _lblSats     = new QLabel("SAT: --", this);
+    _lblSats->setStyleSheet(chipStyle(kMuted));
+    _lblHdop     = new QLabel("HDOP: --.-", this);
+    _lblHdop->setStyleSheet(chipStyle(kMuted));
+    _lblLatLon   = new QLabel("---, ---", this);
+    _lblLatLon->setStyleSheet(chipStyle(kMuted));
+
     QHBoxLayout* statusBar = new QHBoxLayout();
     statusBar->setContentsMargins(0, 0, 0, 0);
     statusBar->setSpacing(8);
@@ -58,15 +72,26 @@ HudWidget::HudWidget(VehicleState* state, QWidget* parent)
     statusBar->addWidget(_lblLink);
     statusBar->addStretch();
 
+    QHBoxLayout* statusBar2 = new QHBoxLayout();
+    statusBar2->setContentsMargins(0, 0, 0, 0);
+    statusBar2->setSpacing(8);
+    statusBar2->addWidget(_lblSpeed);
+    statusBar2->addWidget(_lblThrottle);
+    statusBar2->addWidget(_lblDepthVal);
+    statusBar2->addWidget(_lblSats);
+    statusBar2->addWidget(_lblHdop);
+    statusBar2->addWidget(_lblLatLon);
+    statusBar2->addStretch();
+
     // ── 계기 ──────────────────────────────────────────────────
     _attitude = new AttitudeIndicator(this);
-    _attitude->setFixedSize(280, 280);
+    _attitude->setFixedSize(200, 200);
 
     _compass = new CompassWidget(this);
-    _compass->setFixedSize(200, 200);
+    _compass->setFixedSize(160, 160);
 
     _depth = new DepthGauge(this);
-    _depth->setFixedSize(80, 280);
+    _depth->setFixedSize(60, 200);
     _depth->setMaxDepth(100.0f);
 
     QVBoxLayout* rightCol = new QVBoxLayout();
@@ -88,6 +113,7 @@ HudWidget::HudWidget(VehicleState* state, QWidget* parent)
     root->setContentsMargins(24, 16, 24, 24);
     root->setSpacing(12);
     root->addLayout(statusBar);
+    root->addLayout(statusBar2);
     root->addLayout(instruments);
     setLayout(root);
 
@@ -99,6 +125,7 @@ HudWidget::HudWidget(VehicleState* state, QWidget* parent)
     connect(_state, &VehicleState::heartbeatStatusChanged,this, &HudWidget::onHeartbeatStatusChanged);
     connect(_state, &VehicleState::batteryChanged,        this, &HudWidget::onBatteryChanged);
     connect(_state, &VehicleState::linkQualityChanged,    this, &HudWidget::onLinkQualityChanged);
+    connect(_state, &VehicleState::gpsChanged,            this, &HudWidget::onGpsChanged);
 }
 
 
@@ -121,7 +148,11 @@ void HudWidget::onAttitudeChanged()
 void HudWidget::onVfrHudChanged()
 {
     _compass->setHeading(_state->heading());
-    _depth->setDepth(-_state->depth());  // VFR_HUD altitude: 음수=수심, 표시는 양수
+    _depth->setDepth(-_state->depth());
+
+    _lblSpeed   ->setText(QString("SPD: %1 m/s").arg(_state->groundspeed(), 0, 'f', 1));
+    _lblThrottle->setText(QString("THR: %1%").arg(_state->throttle()));
+    _lblDepthVal->setText(QString("DEP: %1 m").arg(-_state->depth(), 0, 'f', 1));
 }
 
 
@@ -183,6 +214,15 @@ void HudWidget::onLinkQualityChanged()
                       :                    kRed;
     _lblLink->setText(text);
     _lblLink->setStyleSheet(chipStyle(color));
+}
+
+void HudWidget::onGpsChanged()
+{
+    _lblSats  ->setText(QString("SAT: %1").arg(_state->gpsSatCount()));
+    _lblHdop  ->setText(QString("HDOP: %1").arg(_state->gpsHdop(), 0, 'f', 1));
+    _lblLatLon->setText(QString("%1, %2")
+        .arg(_state->latitude(),  0, 'f', 6)
+        .arg(_state->longitude(), 0, 'f', 6));
 }
 
 void HudWidget::onBatteryChanged()

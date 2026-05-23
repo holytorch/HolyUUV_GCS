@@ -24,7 +24,7 @@ Item {
         }
 
         center: QtPositioning.coordinate(35.074857, 129.084836)
-        zoomLevel: 10
+        zoomLevel: 15
 
         Component.onCompleted: {
             for (var i = 0; i < supportedMapTypes.length; i++) {

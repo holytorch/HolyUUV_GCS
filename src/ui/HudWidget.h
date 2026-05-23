@@ -30,15 +30,26 @@ public slots:
     void onHeartbeatStatusChanged();
     void onBatteryChanged();
     void onLinkQualityChanged();
+    void onGpsChanged();
 
 private:
-    VehicleState*      _state       = nullptr;
-    AttitudeIndicator* _attitude    = nullptr;
-    CompassWidget*     _compass     = nullptr;
-    DepthGauge*        _depth       = nullptr;
-    QLabel*            _lblArmed    = nullptr;
-    QLabel*            _lblMode     = nullptr;
-    QLabel*            _lblHb       = nullptr;
-    QLabel*            _lblBattery  = nullptr;
-    QLabel*            _lblLink     = nullptr;
+    VehicleState*      _state        = nullptr;
+    AttitudeIndicator* _attitude     = nullptr;
+    CompassWidget*     _compass      = nullptr;
+    DepthGauge*        _depth        = nullptr;
+
+    // 1행 상태바
+    QLabel*            _lblArmed     = nullptr;
+    QLabel*            _lblMode      = nullptr;
+    QLabel*            _lblHb        = nullptr;
+    QLabel*            _lblBattery   = nullptr;
+    QLabel*            _lblLink      = nullptr;
+
+    // 2행 상태바
+    QLabel*            _lblSpeed     = nullptr;
+    QLabel*            _lblThrottle  = nullptr;
+    QLabel*            _lblDepthVal  = nullptr;
+    QLabel*            _lblSats      = nullptr;
+    QLabel*            _lblHdop      = nullptr;
+    QLabel*            _lblLatLon    = nullptr;
 };

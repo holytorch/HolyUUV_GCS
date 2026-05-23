@@ -304,7 +304,7 @@ QPushButton* JoystickWidget::makeFaceButton(const QString& label, int btnIndex,
                                              const QString& gradient)
 {
     QPushButton* btn = new QPushButton(label, this);
-    btn->setFixedSize(42, 42);
+    btn->setFixedSize(28, 28);
     // Qt QSS는 CSS filter 미지원 — pressed는 외곽선 + padding으로 명시적 표현.
     btn->setStyleSheet(QString(
         "QPushButton {"
@@ -430,8 +430,8 @@ QWidget* JoystickWidget::_buildControllerCard()
     QFrame* card = new QFrame(this);
     card->setStyleSheet(QString("QFrame { %1 }").arg(kPanel));
     auto* cardLayout = new QVBoxLayout(card);
-    cardLayout->setContentsMargins(20, 16, 20, 20);
-    cardLayout->setSpacing(16);
+    cardLayout->setContentsMargins(8, 6, 8, 6);
+    cardLayout->setSpacing(4);
 
     // ── 상단 스트립 (LT LB View G Menu RB RT) ────────────────────
     auto* topStrip = new QHBoxLayout();
@@ -451,10 +451,10 @@ QWidget* JoystickWidget::_buildControllerCard()
         QPushButton* btn = makeCtrlButton(tb.label, tb.idx,
             isGuide ? "QPushButton { border-radius: 20px; min-width: 0; padding: 0; }" : "");
         if (isGuide) {
-            btn->setFixedSize(40, 40);
+            btn->setFixedSize(28, 28);
         } else {
-            btn->setFixedHeight(38);
-            btn->setMinimumWidth(52);
+            btn->setFixedHeight(26);
+            btn->setMinimumWidth(36);
         }
         topStrip->addWidget(btn);
     }
@@ -478,13 +478,13 @@ QWidget* JoystickWidget::_buildControllerCard()
     {
         auto* col = makeColumn("LEFT STICK");
         _leftPad = new StickPad(this);
-        _leftPad->setFixedSize(170, 170);
+        _leftPad->setFixedSize(110, 110);
         col->addWidget(_leftPad, 0, Qt::AlignHCenter);
         col->addWidget(makeNote("Strafe / Forward", this));
 
         auto* l3 = makeCtrlButton("L3", 10);
-        l3->setFixedHeight(32);
-        l3->setMinimumWidth(60);
+        l3->setFixedHeight(22);
+        l3->setMinimumWidth(40);
         col->addWidget(l3, 0, Qt::AlignHCenter);
         col->addStretch();
         mainStrip->addLayout(col);
@@ -497,7 +497,7 @@ QWidget* JoystickWidget::_buildControllerCard()
         auto* col = makeColumn("D-PAD");
 
         auto* dpadWidget = new QWidget(this);
-        dpadWidget->setFixedSize(130, 130);
+        dpadWidget->setFixedSize(90, 90);
         auto* dg = new QGridLayout(dpadWidget);
         dg->setContentsMargins(0, 0, 0, 0);
         dg->setSpacing(4);
@@ -506,7 +506,7 @@ QWidget* JoystickWidget::_buildControllerCard()
         auto dpad = [&](const QString& lbl, int idx, int row, int col) {
             auto* btn = makeCtrlButton(lbl, idx,
                 "QPushButton { border-radius: 10px; font-size: 14px; }");
-            btn->setFixedSize(38, 38);
+            btn->setFixedSize(26, 26);
             dg->addWidget(btn, row, col);
         };
         dpad("▲", 12, 0, 1);
@@ -516,7 +516,7 @@ QWidget* JoystickWidget::_buildControllerCard()
 
         // 중앙 허브 (시각 장식, 클릭 안 됨)
         auto* hub = new QFrame(dpadWidget);
-        hub->setFixedSize(38, 38);
+        hub->setFixedSize(26, 26);
         hub->setStyleSheet("background: rgba(255,255,255,0.03);"
                            "border: 1px solid rgba(255,255,255,0.08);"
                            "border-radius: 10px;");
@@ -533,7 +533,7 @@ QWidget* JoystickWidget::_buildControllerCard()
         auto* col = makeColumn("ABXY");
 
         auto* faceWidget = new QWidget(this);
-        faceWidget->setFixedSize(130, 130);
+        faceWidget->setFixedSize(90, 90);
         auto* fg = new QGridLayout(faceWidget);
         fg->setContentsMargins(0, 0, 0, 0);
         fg->setSpacing(4);
@@ -558,13 +558,13 @@ QWidget* JoystickWidget::_buildControllerCard()
     {
         auto* col = makeColumn("RIGHT STICK");
         _rightPad = new StickPad(this);
-        _rightPad->setFixedSize(170, 170);
+        _rightPad->setFixedSize(110, 110);
         col->addWidget(_rightPad, 0, Qt::AlignHCenter);
         col->addWidget(makeNote("Yaw / Heave", this));
 
         auto* r3 = makeCtrlButton("R3", 11);
-        r3->setFixedHeight(32);
-        r3->setMinimumWidth(60);
+        r3->setFixedHeight(22);
+        r3->setMinimumWidth(40);
         col->addWidget(r3, 0, Qt::AlignHCenter);
         col->addStretch();
         mainStrip->addLayout(col);

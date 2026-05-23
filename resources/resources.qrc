@@ -4,5 +4,13 @@
         <file>qml/MapView.qml</file>
         <file>qml/VoyagerView.qml</file>
         <file>qml/GebcoView.qml</file>
+        <file>qml/MissionView.qml</file>
+        <file>qml/CompassRibbon.qml</file>
+        <file>qml/AttitudeIndicator.qml</file>
+        <file>qml/DepthGauge.qml</file>
+        <file alias="assets/HolyUUV_GCS.png">../assets/HolyUUV_GCS.png</file>
+        <file alias="assets/satellite.png">../assets/satellite.png</file>
+        <file alias="assets/map.png">../assets/map.png</file>
+        <file alias="assets/UUV.png">../assets/UUV.png</file>
     </qresource>
 </RCC>

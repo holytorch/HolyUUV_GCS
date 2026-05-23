@@ -1,197 +1,85 @@
 #include "MainWindow.h"
 #include <QWidget>
-#include <QGridLayout>
-#include <QGroupBox>
+#include <QHBoxLayout>
 #include <QVBoxLayout>
+#include <QStatusBar>
 #include <QTabWidget>
 #include <QQmlContext>
 #include <QStandardPaths>
 #include <QDir>
 
-// ─────────────────────────────────────────────────────────────────────────────
-// MainWindow()
-// UI를 구성하고 VehicleState 변경 신호를 각 슬롯에 연결한다.
-// ─────────────────────────────────────────────────────────────────────────────
 MainWindow::MainWindow(VehicleState* state, QWidget* parent)
     : QMainWindow(parent), _state(state)
 {
     setWindowTitle("HolyUUV GCS");
-    resize(1280, 720);
+    resize(1600, 900);
+    statusBar()->hide();
     _setupUi();
 
-    connect(_state, &VehicleState::batteryChanged,  this, &MainWindow::onBatteryChanged);
-    connect(_state, &VehicleState::attitudeChanged, this, &MainWindow::onAttitudeChanged);
-    connect(_state, &VehicleState::vfrHudChanged,   this, &MainWindow::onVfrHudChanged);
-    connect(_state, &VehicleState::gpsChanged,      this, &MainWindow::onGpsChanged);
+    connect(_state, &VehicleState::gpsChanged, this, &MainWindow::onGpsChanged);
 }
 
 
-// ─────────────────────────────────────────────────────────────────────────────
-// _setupUi()
-// Status / OSM / Voyager / 3D Terrain 네 탭으로 구성된 UI를 생성한다.
-// 3D Terrain 탭으로 전환 시 OSM 맵 중심 좌표를 TerrainWidget에 전달한다.
-// ─────────────────────────────────────────────────────────────────────────────
 void MainWindow::_setupUi()
 {
-    QTabWidget* tabs = new QTabWidget(this);
+    QWidget*     root       = new QWidget(this);
+    QVBoxLayout* rootLayout = new QVBoxLayout(root);
+    rootLayout->setContentsMargins(4, 4, 4, 4);
+    rootLayout->setSpacing(4);
 
-    // ── Status 탭 ────────────────────────────────────────────
-    QWidget*     statusTab = new QWidget();
-    QVBoxLayout* root      = new QVBoxLayout(statusTab);
+    // ── 중앙 영역: 좌(HUD) + 중(지도) + 우(3D) ──────────────────
+    QHBoxLayout* midLayout = new QHBoxLayout();
+    midLayout->setSpacing(4);
 
-    _labelStatus = new QLabel("● Disconnected");
-    _labelStatus->setStyleSheet("color: red; font-weight: bold;");
-    root->addWidget(_labelStatus);
-
-    QGroupBox*   battGroup  = new QGroupBox("Battery");
-    QGridLayout* battLayout = new QGridLayout(battGroup);
-    battLayout->addWidget(new QLabel("Remaining:"), 0, 0);
-    battLayout->addWidget(_labelBattery  = new QLabel("---%"),    0, 1);
-    battLayout->addWidget(new QLabel("Voltage:"),   0, 2);
-    battLayout->addWidget(_labelVoltage  = new QLabel("--.- V"),  0, 3);
-    battLayout->addWidget(new QLabel("Current:"),   0, 4);
-    battLayout->addWidget(_labelCurrent  = new QLabel("--.- A"),  0, 5);
-    root->addWidget(battGroup);
-
-    QGroupBox*   attGroup  = new QGroupBox("Attitude");
-    QGridLayout* attLayout = new QGridLayout(attGroup);
-    attLayout->addWidget(new QLabel("Roll:"),  0, 0);
-    attLayout->addWidget(_labelRoll  = new QLabel("--.-°"), 0, 1);
-    attLayout->addWidget(new QLabel("Pitch:"), 0, 2);
-    attLayout->addWidget(_labelPitch = new QLabel("--.-°"), 0, 3);
-    attLayout->addWidget(new QLabel("Yaw:"),   0, 4);
-    attLayout->addWidget(_labelYaw   = new QLabel("--.-°"), 0, 5);
-    root->addWidget(attGroup);
-
-    QGroupBox*   navGroup  = new QGroupBox("Navigation");
-    QGridLayout* navLayout = new QGridLayout(navGroup);
-    navLayout->addWidget(new QLabel("Depth:"),    0, 0);
-    navLayout->addWidget(_labelDepth    = new QLabel("--.- m"),   0, 1);
-    navLayout->addWidget(new QLabel("Speed:"),    0, 2);
-    navLayout->addWidget(_labelSpeed    = new QLabel("--.- m/s"), 0, 3);
-    navLayout->addWidget(new QLabel("Heading:"),  0, 4);
-    navLayout->addWidget(_labelHeading  = new QLabel("---°"),     0, 5);
-    navLayout->addWidget(new QLabel("Throttle:"), 1, 0);
-    navLayout->addWidget(_labelThrottle = new QLabel("---%"),     1, 1);
-    root->addWidget(navGroup);
-
-    QGroupBox*   gpsGroup  = new QGroupBox("GPS");
-    QGridLayout* gpsLayout = new QGridLayout(gpsGroup);
-    gpsLayout->addWidget(new QLabel("Satellites:"), 0, 0);
-    gpsLayout->addWidget(_labelSats   = new QLabel("--"),        0, 1);
-    gpsLayout->addWidget(new QLabel("HDOP:"),       0, 2);
-    gpsLayout->addWidget(_labelHdop   = new QLabel("--.-"),      0, 3);
-    gpsLayout->addWidget(new QLabel("Position:"),   1, 0);
-    gpsLayout->addWidget(_labelLatLon = new QLabel("---, ---"),  1, 1, 1, 3);
-    root->addWidget(gpsGroup);
-
-    root->addStretch();
-    tabs->addTab(statusTab, "Status");
-
-    // ── HUD 탭 ───────────────────────────────────────────────
-    _hudWidget = new HudWidget(_state);
-    tabs->addTab(_hudWidget, "HUD");
-
-    // ── OSM 맵 탭 ────────────────────────────────────────────
+    // MapBridge 캐시 디렉토리 초기화 (Mission탭 맵이 사용)
     _mapBridge.initCacheDir();
 
-    _mapWidget = new QQuickWidget();
-    _mapWidget->rootContext()->setContextProperty("bridge", &_mapBridge);
-    _mapWidget->setSource(QUrl("qrc:/qml/MapView.qml"));
-    _mapWidget->setResizeMode(QQuickWidget::SizeRootObjectToView);
-    tabs->addTab(_mapWidget, "OSM");
+    // 좌측: HUD 계기판
+    _hudWidget = new HudWidget(_state, root);
+    _hudWidget->setFixedWidth(480);
+    midLayout->addWidget(_hudWidget);
 
-    // ── Voyager 맵 탭 ─────────────────────────────────────────
-    _positronWidget = new QQuickWidget();
-    _positronWidget->rootContext()->setContextProperty("bridge", &_mapBridge);
-    _positronWidget->setSource(QUrl("qrc:/qml/VoyagerView.qml"));
-    _positronWidget->setResizeMode(QQuickWidget::SizeRootObjectToView);
-    tabs->addTab(_positronWidget, "Voyager");
+    // 중앙: (비어 있음 — 추후 다른 위젯 배치 예정)
+    midLayout->addStretch(1);
 
-    // ── Joystick 탭 ───────────────────────────────────────────
-    _joystickWidget = new JoystickWidget();
-    tabs->addTab(_joystickWidget, "Joystick");
+    // 우측: 3D Terrain
+    _terrainWidget = new TerrainWidget(root);
+    _terrainWidget->setFixedWidth(440);
+    midLayout->addWidget(_terrainWidget);
 
-    // ── 3D Terrain 탭 ─────────────────────────────────────────
-    _terrainWidget = new TerrainWidget();
-    tabs->addTab(_terrainWidget, "3D Terrain");
-    // 자동 로드 제거 — 탭 전환마다 fetch가 겹치면서 무한 트리거 버그 발생.
-    // 사용자가 명시적으로 "Load Terrain" 버튼을 눌렀을 때만 로드한다.
+    rootLayout->addLayout(midLayout, 1);
+
+    // ── 하단: 조이스틱 ───────────────────────────────────────────
+    _joystickWidget = new JoystickWidget(root);
+    _joystickWidget->setFixedHeight(600);
+    rootLayout->addWidget(_joystickWidget);
+
+    QQuickWidget* missionWidget = new QQuickWidget(this);
+    missionWidget->rootContext()->setContextProperty("bridge", &_mapBridge);
+    missionWidget->setSource(QUrl("qrc:/qml/MissionView.qml"));
+    missionWidget->setResizeMode(QQuickWidget::SizeRootObjectToView);
+
+    QTabWidget* tabs = new QTabWidget(this);
+    tabs->setStyleSheet(
+        "QTabWidget::pane { border: 0; background: #0d1620; }"
+        "QTabBar { background: #0a1018; }"
+        "QTabBar::tab {"
+        "  background: #0a1018; color: #aaaaaa;"
+        "  padding: 8px 18px; border: none;"
+        "  font-size: 12px; font-weight: 600;"
+        "}"
+        "QTabBar::tab:selected { background: #1a2530; color: #ffffff; }"
+        "QTabBar::tab:hover:!selected { background: #14202c; color: #cccccc; }"
+    );
+    tabs->addTab(root, "Operations");
+    tabs->addTab(missionWidget, "Mission");
 
     setCentralWidget(tabs);
 }
 
 
-// ─────────────────────────────────────────────────────────────────────────────
-// onBatteryChanged()
-// VehicleState::batteryChanged 신호에 연결된 슬롯.
-// ─────────────────────────────────────────────────────────────────────────────
-void MainWindow::onBatteryChanged()
-{
-    _labelBattery->setText(QString("%1%").arg(_state->batteryRemaining()));
-    _labelVoltage->setText(QString("%1 V").arg(_state->voltage(), 0, 'f', 1));
-    _labelCurrent->setText(QString("%1 A").arg(_state->current() / 100.0f, 0, 'f', 1));
-}
-
-
-// ─────────────────────────────────────────────────────────────────────────────
-// onAttitudeChanged()
-// VehicleState::attitudeChanged 신호에 연결된 슬롯. rad → deg 변환 후 표시.
-// ─────────────────────────────────────────────────────────────────────────────
-void MainWindow::onAttitudeChanged()
-{
-    const float toDeg = 180.0f / 3.14159265f;
-    _labelRoll ->setText(QString("%1°").arg(_state->roll()  * toDeg, 0, 'f', 1));
-    _labelPitch->setText(QString("%1°").arg(_state->pitch() * toDeg, 0, 'f', 1));
-    _labelYaw  ->setText(QString("%1°").arg(_state->yaw()   * toDeg, 0, 'f', 1));
-}
-
-
-// ─────────────────────────────────────────────────────────────────────────────
-// onVfrHudChanged()
-// VehicleState::vfrHudChanged 신호에 연결된 슬롯.
-// depth는 VFR_HUD altitude의 부호 반전값(수심이 양수로 표시되도록).
-// ─────────────────────────────────────────────────────────────────────────────
-void MainWindow::onVfrHudChanged()
-{
-    // depth는 VFR_HUD altitude 그대로 — 수중에서 음수로 표시 (예: -5.32 m).
-    _labelDepth   ->setText(QString("%1 m").arg(_state->depth(), 0, 'f', 2));
-    _labelSpeed   ->setText(QString("%1 m/s").arg(_state->groundspeed(), 0, 'f', 1));
-    _labelHeading ->setText(QString("%1°").arg(_state->heading(), 0, 'f', 0));
-    _labelThrottle->setText(QString("%1%").arg(_state->throttle()));
-}
-
-
-// ─────────────────────────────────────────────────────────────────────────────
-// onGpsChanged()
-// VehicleState::gpsChanged 신호에 연결된 슬롯.
-// GPS 좌표를 MapBridge와 TerrainWidget에도 전달한다.
-// ─────────────────────────────────────────────────────────────────────────────
 void MainWindow::onGpsChanged()
 {
-    _labelSats  ->setText(QString::number(_state->gpsSatCount()));
-    _labelHdop  ->setText(QString("%1").arg(_state->gpsHdop(), 0, 'f', 1));
-    _labelLatLon->setText(QString("%1, %2")
-        .arg(_state->latitude(),  0, 'f', 6)
-        .arg(_state->longitude(), 0, 'f', 6));
-
     _mapBridge.updatePosition(_state->latitude(), _state->longitude());
     _terrainWidget->updateVehiclePosition(_state->latitude(), _state->longitude());
-}
-
-
-// ─────────────────────────────────────────────────────────────────────────────
-// onLinkConnected() / onLinkDisconnected()
-// LinkManager 상태 변경 시 상태 레이블 색상과 텍스트를 갱신한다.
-// ─────────────────────────────────────────────────────────────────────────────
-void MainWindow::onLinkConnected()
-{
-    _labelStatus->setText("● Connected");
-    _labelStatus->setStyleSheet("color: green; font-weight: bold;");
-}
-
-void MainWindow::onLinkDisconnected()
-{
-    _labelStatus->setText("● Disconnected");
-    _labelStatus->setStyleSheet("color: red; font-weight: bold;");
 }

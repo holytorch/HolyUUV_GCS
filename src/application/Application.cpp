@@ -38,11 +38,7 @@ bool Application::initialize()
         return false;
     }
 
-    // ILINK -> LinkManager → MainWindow 업데이트 파이프라인
-    connect(&_linkManager, &LinkManager::linkConnected,
-            &_mainWindow, &MainWindow::onLinkConnected);
-    connect(&_linkManager, &LinkManager::linkDisconnected,
-            &_mainWindow, &MainWindow::onLinkDisconnected);
+    // ILink → LinkManager → MavlinkManager 데이터 파이프라인
     connect(&_linkManager, &LinkManager::linkError, [](const QString& msg) {
         qCritical("Link error: %s", qPrintable(msg));
     });
