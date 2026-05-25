@@ -90,7 +90,7 @@ Item {
             ctx.font = "bold 14px sans-serif"
             ctx.textAlign = "center"
             ctx.textBaseline = "bottom"
-            ctx.fillText(root.depth.toFixed(1) + "m", barX + barW / 2, height - 4)
+            ctx.fillText("-" + root.depth.toFixed(1) + "m", barX + barW / 2, height - 4)
         }
     }
 }

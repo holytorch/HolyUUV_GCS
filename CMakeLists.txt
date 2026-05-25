@@ -42,15 +42,15 @@ SET(SOURCES
     src/main.cpp
     src/application/Application.cpp
     src/comm/ILink.cpp
-    src/comm/UsbBoardInfo.cpp
     src/vehicle/VehicleState.cpp
     src/ui/MainWindow.cpp
     src/comm/LinkManager.cpp
-    src/comm/SerialLink.cpp
     src/comm/UdpLink.cpp
-    src/comm/TcpLink.cpp
     src/mavlink/MavlinkManager.cpp
     src/ui/MapBridge.cpp
+    src/ui/LogFeed.cpp
+    src/ui/VehicleCommander.cpp
+    src/ui/ConnectionBridge.cpp
     src/ui/HudWidget.cpp
     src/ui/hud/AttitudeIndicator.cpp
     src/ui/hud/CompassWidget.cpp
@@ -61,7 +61,7 @@ SET(SOURCES
     src/map/TileCacheWorker.cpp
     src/map/TileServer.cpp
     src/terrain/TerrainTile.cpp
-    src/terrain/TerrainWidget.cpp
+    src/terrain/TerrainScene.cpp
 )
 
 SET(RESOURCES

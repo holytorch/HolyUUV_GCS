@@ -4,7 +4,31 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // MavlinkManager()
 // ─────────────────────────────────────────────────────────────────────────────
-MavlinkManager::MavlinkManager(QObject* parent) : QObject(parent) {}
+MavlinkManager::MavlinkManager(QObject* parent) : QObject(parent)
+{
+    _gcsHeartbeatTimer = new QTimer(this);
+    _gcsHeartbeatTimer->setInterval(1000);
+    connect(_gcsHeartbeatTimer, &QTimer::timeout, this, [this]() {
+#ifdef MAVLINK_AVAILABLE
+        mavlink_message_t msg;
+        mavlink_msg_heartbeat_pack(255, 0, &msg,
+                                   MAV_TYPE_GCS,
+                                   MAV_AUTOPILOT_INVALID,
+                                   MAV_MODE_MANUAL_ARMED,
+                                   0,
+                                   MAV_STATE_ACTIVE);
+        _emitMessage(msg);
+#endif
+    });
+
+    _vehicleWatchdog = new QTimer(this);
+    _vehicleWatchdog->setSingleShot(true);
+    _vehicleWatchdog->setInterval(5000);
+    connect(_vehicleWatchdog, &QTimer::timeout, this, [this]() {
+        LOG_INFO("Vehicle heartbeat timeout (5s) → disconnect");
+        emit vehicleTimedOut();
+    });
+}
 
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -38,26 +62,32 @@ void MavlinkManager::parseBytes(const QByteArray& data)
                     mavlink_heartbeat_t hb;
                     mavlink_msg_heartbeat_decode(&_message, &hb);
 
-                    const bool isAutopilot = (hb.autopilot != MAV_AUTOPILOT_INVALID);
+                    const uint8_t fromSysid = _message.sysid;
+                    const bool isAutopilot  = (hb.autopilot != MAV_AUTOPILOT_INVALID);
 
-                    // 첫 autopilot HEARTBEAT에서만 target latch (이후 다른 sysid로 안 바뀜).
-                    // mavlink-router 같은 중계기가 자기 HEARTBEAT를 끼워보내도
-                    // autopilot이 아니면 무시.
-                    if (isAutopilot && !_loggedFirstHeartbeat) {
-                        _targetSysid       = _message.sysid;
-                        _targetCompid      = _message.compid;
-                        _loggedFirstHeartbeat = true;
-                        LOG_INFO("First HEARTBEAT (autopilot): sysid=%d compid=%d type=%d base=0x%02X custom=%u → target locked",
-                                 _targetSysid, _targetCompid,
+                    // 중계기(autopilot=INVALID) HEARTBEAT는 차량 감지에서 제외.
+                    // 새 autopilot sysid면 감지 목록에 추가 + UI에 알림.
+                    if (isAutopilot && !_detectedSysids.contains(fromSysid)) {
+                        _detectedSysids.insert(fromSysid);
+                        LOG_INFO("Detected vehicle: sysid=%d compid=%d type=%d base=0x%02X custom=%u",
+                                 fromSysid, _message.compid,
                                  hb.type, hb.base_mode, hb.custom_mode);
+                        emit sysidDetected(static_cast<int>(fromSysid));
+
+                        // 첫 차량이면 자동 활성화 (이후 새 sysid 발견해도 active는 유지)
+                        if (_activeSysid == 0) {
+                            _activeSysid  = fromSysid;
+                            _targetCompid = _message.compid;
+                            emit activeSysidChanged(static_cast<int>(fromSysid));
+                        }
                     }
 
-                    // VehicleState로는 latch된 target의 HEARTBEAT만 전달.
-                    // 중계기 heartbeat(armed=0)와 autopilot heartbeat(armed=1)이
-                    // 번갈아 도착하면 ARMED/DISARMED 깜빡임 발생 → 여기서 차단.
-                    if (_loggedFirstHeartbeat &&
-                        _message.sysid  == _targetSysid &&
-                        _message.compid == _targetCompid) {
+                    // 활성 차량 HEARTBEAT 수신 → watchdog 리셋
+                    if (fromSysid == _activeSysid && _vehicleWatchdog->isActive())
+                        _vehicleWatchdog->start();
+
+                    // 활성 차량의 HEARTBEAT만 VehicleState로 전달.
+                    if (fromSysid == _activeSysid && _message.compid == _targetCompid) {
                         MavlinkHeartbeat out;
                         out.type         = hb.type;
                         out.autopilot    = hb.autopilot;
@@ -70,6 +100,7 @@ void MavlinkManager::parseBytes(const QByteArray& data)
                 }
 
                 case MAVLINK_MSG_ID_ATTITUDE: {
+                    if (_message.sysid != _activeSysid) break;
                     mavlink_attitude_t att;
                     mavlink_msg_attitude_decode(&_message, &att);
                     MavlinkAttitude out;
@@ -84,6 +115,7 @@ void MavlinkManager::parseBytes(const QByteArray& data)
                 }
 
                 case MAVLINK_MSG_ID_SYS_STATUS: {
+                    if (_message.sysid != _activeSysid) break;
                     mavlink_sys_status_t sys;
                     mavlink_msg_sys_status_decode(&_message, &sys);
                     MavlinkSysStatus out;
@@ -97,6 +129,7 @@ void MavlinkManager::parseBytes(const QByteArray& data)
                 }
 
                 case MAVLINK_MSG_ID_RADIO_STATUS: {
+                    // RADIO_STATUS는 라디오 모뎀이 보냄 (sysid 0 또는 51). 활성 차량 필터 안 함.
                     mavlink_radio_status_t radio;
                     mavlink_msg_radio_status_decode(&_message, &radio);
                     MavlinkRadioStatus out;
@@ -109,18 +142,8 @@ void MavlinkManager::parseBytes(const QByteArray& data)
                     break;
                 }
 
-                case MAVLINK_MSG_ID_SCALED_PRESSURE: {
-                    mavlink_scaled_pressure_t sp;
-                    mavlink_msg_scaled_pressure_decode(&_message, &sp);
-                    MavlinkScaledPressure out;
-                    out.pressureAbs  = sp.press_abs;
-                    out.pressureDiff = sp.press_diff;
-                    out.temperature  = sp.temperature;
-                    emit scaledPressureReceived(out);
-                    break;
-                }
-
                 case MAVLINK_MSG_ID_VFR_HUD: {
+                    if (_message.sysid != _activeSysid) break;
                     mavlink_vfr_hud_t hud;
                     mavlink_msg_vfr_hud_decode(&_message, &hud);
                     MavlinkVfrHud out;
@@ -133,6 +156,7 @@ void MavlinkManager::parseBytes(const QByteArray& data)
                 }
 
                 case MAVLINK_MSG_ID_GLOBAL_POSITION_INT: {
+                    if (_message.sysid != _activeSysid) break;
                     mavlink_global_position_int_t pos;
                     mavlink_msg_global_position_int_decode(&_message, &pos);
                     MavlinkGlobalPosition out;
@@ -160,6 +184,7 @@ void MavlinkManager::parseBytes(const QByteArray& data)
                 }
 
                 case MAVLINK_MSG_ID_GPS_RAW_INT: {
+                    if (_message.sysid != _activeSysid) break;
                     mavlink_gps_raw_int_t gps;
                     mavlink_msg_gps_raw_int_decode(&_message, &gps);
                     MavlinkGpsRaw out;
@@ -208,17 +233,21 @@ void MavlinkManager::_emitMessage(mavlink_message_t& msg)
 void MavlinkManager::sendArmDisarm(bool arm)
 {
 #ifdef MAVLINK_AVAILABLE
-    LOG_INFO("Send ARM_DISARM → target %d:%d : %s",
-             _targetSysid, _targetCompid, arm ? "ARM" : "DISARM");
+    LOG_INFO("Send ARM_DISARM → target %d:%d : %s (force)",
+             _activeSysid, _targetCompid, arm ? "ARM" : "DISARM");
 
+    // param2 = 21196 (magic value, QGC의 "Force Arm" 동일):
+    // pre-arm 체크를 우회. SITL/dev에서 GPS lock 없거나 EKF 미수렴이어도
+    // ARM 가능하게 함. 실차량 운용 시 안전 정책 별도 고려 필요.
     mavlink_message_t msg;
     mavlink_msg_command_long_pack(
         255, 0, &msg,                     // GCS sysid, compid
-        _targetSysid, _targetCompid,      // target = HEARTBEAT에서 latch된 값
+        _activeSysid, _targetCompid,      // target = HEARTBEAT에서 latch된 값
         MAV_CMD_COMPONENT_ARM_DISARM,
         0,                                // confirmation
         arm ? 1.0f : 0.0f,                // param1
-        0, 0, 0, 0, 0, 0                  // param2~7 unused
+        arm ? 21196.0f : 0.0f,            // param2: 21196 = force when arming
+        0, 0, 0, 0, 0                     // param3~7 unused
     );
     _emitMessage(msg);
 #else
@@ -240,13 +269,13 @@ void MavlinkManager::sendManualControl(int16_t x, int16_t y, int16_t z,
     if (!_loggedFirstManualControl) {
         _loggedFirstManualControl = true;
         LOG_INFO("First MANUAL_CONTROL → target sysid=%d  x=%d y=%d z=%d r=%d btns=0x%04X",
-                 _targetSysid, x, y, z, r, buttons);
+                 _activeSysid, x, y, z, r, buttons);
     }
 
     mavlink_message_t msg;
     // buttons2/enabled_extensions/aux1~6/s/t: 사용하지 않으므로 0
     mavlink_msg_manual_control_pack(255, 0, &msg,
-                                    _targetSysid,
+                                    _activeSysid,
                                     x, y, z, r,
                                     buttons,
                                     0, 0,                  // buttons2, enabled_extensions
@@ -254,5 +283,85 @@ void MavlinkManager::sendManualControl(int16_t x, int16_t y, int16_t z,
     _emitMessage(msg);
 #else
     Q_UNUSED(x); Q_UNUSED(y); Q_UNUSED(z); Q_UNUSED(r); Q_UNUSED(buttons);
+#endif
+}
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// startHeartbeat() / stopHeartbeat()
+// linkConnected/linkDisconnected 에 연결. GCS HEARTBEAT 타이머와 차량 watchdog를
+// 함께 제어한다.
+// ─────────────────────────────────────────────────────────────────────────────
+void MavlinkManager::startHeartbeat()
+{
+    _gcsHeartbeatTimer->start();
+    _vehicleWatchdog->start();
+    LOG_INFO("GCS heartbeat started (1Hz), vehicle watchdog started (5s)");
+}
+
+void MavlinkManager::stopHeartbeat()
+{
+    _gcsHeartbeatTimer->stop();
+    _vehicleWatchdog->stop();
+}
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// resetVehicleLatch()
+// 연결 해제 시 호출. 감지된 sysid 목록과 active sysid를 모두 초기화한다.
+// 다음 연결의 첫 HEARTBEAT가 다시 latch 단계부터 진행.
+// ─────────────────────────────────────────────────────────────────────────────
+void MavlinkManager::resetVehicleLatch()
+{
+    _detectedSysids.clear();
+    if (_activeSysid != 0) {
+        _activeSysid = 0;
+        emit activeSysidChanged(0);
+    }
+    _loggedFirstManualControl = false;
+}
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// setActiveSysid()
+// 사용자가 트리에서 다른 sysid를 클릭했을 때 호출. 0이면 active 해제.
+// 감지 목록에 없는 sysid라도 설정 가능 (대기 상태로).
+// ─────────────────────────────────────────────────────────────────────────────
+void MavlinkManager::setActiveSysid(int sysid)
+{
+    const uint8_t s = static_cast<uint8_t>(sysid);
+    if (s == _activeSysid) return;
+    _activeSysid = s;
+    LOG_INFO("Active sysid switched to %d", _activeSysid);
+    emit activeSysidChanged(sysid);
+}
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// sendSetMode()
+// MAVLink SET_MODE 메시지로 ArduSub의 비행 모드를 변경한다.
+// base_mode에 MAV_MODE_FLAG_CUSTOM_MODE_ENABLED 비트를 켜고
+// custom_mode에 모드 번호 전달.
+//
+// ArduSub custom_mode 값:
+//   0=STABILIZE  1=ACRO  2=ALT_HOLD  3=AUTO  4=GUIDED  7=CIRCLE
+//   9=SURFACE  16=POSHOLD  19=MANUAL  20=MOTOR_DETECT
+// ─────────────────────────────────────────────────────────────────────────────
+void MavlinkManager::sendSetMode(uint32_t customMode)
+{
+#ifdef MAVLINK_AVAILABLE
+    LOG_INFO("Send SET_MODE → target %d : custom_mode=%u",
+             _activeSysid, customMode);
+
+    mavlink_message_t msg;
+    mavlink_msg_set_mode_pack(
+        255, 0, &msg,                               // GCS sysid, compid
+        _activeSysid,
+        MAV_MODE_FLAG_CUSTOM_MODE_ENABLED,           // base_mode (0x01)
+        customMode                                   // custom_mode
+    );
+    _emitMessage(msg);
+#else
+    Q_UNUSED(customMode);
 #endif
 }

@@ -1,10 +1,9 @@
 #include "Application.h"
 #include "comm/UdpLink.h"
-// #include "comm/SerialLink.h"   // 실기기 대응 시 활성화
-// #include "comm/UsbBoardInfo.h" // 실기기 대응 시 활성화
 #include "ui/joystick/JoystickWidget.h"
+#include "ui/VehicleCommander.h"
+#include "ui/ConnectionBridge.h"
 #include <QApplication>
-// #include <QSerialPortInfo>     // 실기기 대응 시 활성화
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Application()
@@ -82,6 +81,22 @@ bool Application::initialize()
         _vehicleState.updateHeartbeat(armed, hb.customMode);
     });
 
+    // 활성 sysid 변경 → VehicleState에 sysid 반영 + telemetry 리셋 (stale 표시 방지)
+    connect(&_mavlinkManager, &MavlinkManager::activeSysidChanged,
+            [this](int sysid) {
+        _vehicleState.resetTelemetry();
+        _vehicleState.setSysid(sysid);
+        if (auto* conn = _mainWindow.connection())
+            conn->setActiveSysidMirror(sysid);
+    });
+
+    // 새 sysid 감지 → ConnectionBridge 미러 (QML 트리에 추가)
+    connect(&_mavlinkManager, &MavlinkManager::sysidDetected,
+            [this](int sysid) {
+        if (auto* conn = _mainWindow.connection())
+            conn->addDetectedSysid(sysid);
+    });
+
 
 
     // JoystickWidget → MavlinkManager → LinkManager 송신 파이프라인
@@ -96,7 +111,7 @@ bool Application::initialize()
         UdpConfig cfg;
         cfg.remoteHost = host;
         cfg.remotePort = port;
-        cfg.localPort  = port;
+        cfg.localPort  = 0;   // OS가 빈 포트 자동 할당 (SITL 포트 충돌 방지)
         _linkManager.setLink(std::make_unique<UdpLink>(cfg));
     });
     connect(_mainWindow.joystickWidget(), &JoystickWidget::disconnectRequested,
@@ -110,34 +125,61 @@ bool Application::initialize()
     connect(&_linkManager, &LinkManager::linkDisconnected,
             _mainWindow.joystickWidget(), &JoystickWidget::onLinkDisconnected);
 
+    // GCS HEARTBEAT 타이머 + 차량 watchdog 제어
+    connect(&_linkManager, &LinkManager::linkConnected,
+            &_mavlinkManager, &MavlinkManager::startHeartbeat);
+    connect(&_linkManager, &LinkManager::linkDisconnected,
+            &_mavlinkManager, &MavlinkManager::stopHeartbeat);
+    // 차량 5초 무응답 → 자동 disconnect
+    connect(&_mavlinkManager, &MavlinkManager::vehicleTimedOut,
+            [this]() { _linkManager.removeLink(); });
+
+    // QML 컨트롤센터 버튼/조이스틱 → MAVLink 송신 (JoystickWidget과 동일 슬롯 공유)
+    if (auto* cmd = _mainWindow.commander()) {
+        connect(cmd, &VehicleCommander::armRequested,
+                &_mavlinkManager, &MavlinkManager::sendArmDisarm);
+        connect(cmd, &VehicleCommander::setModeRequested,
+                &_mavlinkManager, &MavlinkManager::sendSetMode);
+        connect(cmd, &VehicleCommander::manualControlRequested,
+                &_mavlinkManager, &MavlinkManager::sendManualControl);
+    }
+
+    // QML connection 브리지 → LinkManager (Phase 1: single-link).
+    // Connect 요청: 기존 링크가 있으면 자동 해제 후 새 UdpLink 생성.
+    if (auto* conn = _mainWindow.connection()) {
+        connect(conn, &ConnectionBridge::connectRequested,
+                [this](const QString& host, quint16 port) {
+            UdpConfig cfg;
+            cfg.remoteHost = host;
+            cfg.remotePort = port;
+            cfg.localPort  = 0;   // OS가 빈 포트 자동 할당
+            _linkManager.setLink(std::make_unique<UdpLink>(cfg));
+        });
+        connect(conn, &ConnectionBridge::disconnectRequested,
+                [this]() { _linkManager.removeLink(); });
+
+        // LinkManager 상태 변화를 브리지에 반영 (QML connected 프로퍼티)
+        connect(&_linkManager, &LinkManager::linkConnected, conn,
+                [conn]() { conn->setConnected(true); });
+        connect(&_linkManager, &LinkManager::linkDisconnected, conn,
+                [conn, this]() {
+            conn->setConnected(false);
+            conn->clearDetectedSysids();
+            // 연결 해제 시 mavlink sysid latch + vehicle telemetry 초기화
+            _mavlinkManager.resetVehicleLatch();
+            _vehicleState.resetTelemetry();
+            _vehicleState.setSysid(0);
+        });
+
+        // QML이 sysid 클릭 → MavlinkManager에 active 변경 요청
+        connect(conn, &ConnectionBridge::activeSysidChangeRequested,
+                &_mavlinkManager, &MavlinkManager::setActiveSysid);
+    }
 
 
 
-    // 시그널-슬롯 전부 연결 후에 창을 표시한다 (연결 상태 초기화 위해)
+
     _mainWindow.show();
-
-
-    // 실기기 대응 코드 (GCS 개발 완료 후 차후 진행 예정)
-    // QString mavlinkPort;
-    // const UsbBoardInfo& boardInfo = UsbBoardInfo::instance();
-    // for (const QSerialPortInfo& info : QSerialPortInfo::availablePorts()) {
-    //     if (boardInfo.isMavlinkBoard(info)) {
-    //         mavlinkPort = info.systemLocation();
-    //         qInfo("MAVLink board detected: %s (%s)",
-    //               qPrintable(boardInfo.boardName(info)),
-    //               qPrintable(mavlinkPort));
-    //         break;
-    //     }
-    // }
-    // if (!mavlinkPort.isEmpty()) {
-    //     SerialConfig config;
-    //     config.portName = mavlinkPort;
-    //     config.baudRate = 57600;
-    //     qInfo("Serial port found: %s", qPrintable(mavlinkPort));
-    //     _linkManager.setLink(std::make_unique<SerialLink>(config));
-    // } else {
-    //     qInfo("Serial port 없음 → Joystick 탭에서 UDP 연결");
-    // }
 
     
     return true;

@@ -22,6 +22,7 @@ class MapBridge : public QObject {
     Q_PROPERTY(double  mapCenterLat  READ mapCenterLat  NOTIFY mapCenterChanged)
     Q_PROPERTY(double  mapCenterLon  READ mapCenterLon  NOTIFY mapCenterChanged)
     Q_PROPERTY(QString tileCachePath READ tileCachePath CONSTANT)
+    Q_PROPERTY(QString mapMode       READ mapMode       NOTIFY mapModeChanged)
 
 public:
     explicit MapBridge(QObject* parent = nullptr) : QObject(parent) {}
@@ -34,6 +35,7 @@ public:
     QString tileCachePath() const {
         return QStandardPaths::writableLocation(QStandardPaths::CacheLocation) + "/tiles";
     }
+    QString mapMode() const { return _mapMode; }
 
     void updatePosition(double lat, double lon) {
         _lat = lat; _lon = lon; _hasPos = true;
@@ -45,16 +47,25 @@ public:
         emit mapCenterChanged();
     }
 
+    // QML 맵 모드("osm" / "voyager" / "3d") 변경 알림. Mission 탭 3D 스택 토글에 사용.
+    Q_INVOKABLE void setMapMode(const QString& mode) {
+        if (_mapMode == mode) return;
+        _mapMode = mode;
+        emit mapModeChanged(mode);
+    }
+
     void initCacheDir() const;
 
 signals:
     void positionChanged();
     void mapCenterChanged();
+    void mapModeChanged(const QString& mode);
 
 private:
-    double _lat = 0.0;
-    double _lon = 0.0;
-    bool   _hasPos = false;
-    double _mapCenterLat = 35.074857;
-    double _mapCenterLon = 129.084836;
+    double  _lat = 0.0;
+    double  _lon = 0.0;
+    bool    _hasPos = false;
+    double  _mapCenterLat = 35.074857;
+    double  _mapCenterLon = 129.084836;
+    QString _mapMode = "osm";
 };

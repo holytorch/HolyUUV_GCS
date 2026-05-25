@@ -19,9 +19,40 @@
 // ─────────────────────────────────────────────────────────────────────────────
 class VehicleState : public QObject {
     Q_OBJECT
+    // QML 바인딩용 — getter 시그니처는 그대로 두고 어노테이션만 추가.
+    Q_PROPERTY(int     sysid            READ sysid            NOTIFY sysidChanged)
+    Q_PROPERTY(int     batteryRemaining READ batteryRemaining NOTIFY batteryChanged)
+    Q_PROPERTY(float   voltage          READ voltage          NOTIFY batteryChanged)
+    Q_PROPERTY(float   current          READ current          NOTIFY batteryChanged)
+
+    Q_PROPERTY(float   roll             READ roll             NOTIFY attitudeChanged)
+    Q_PROPERTY(float   pitch            READ pitch            NOTIFY attitudeChanged)
+    Q_PROPERTY(float   yaw              READ yaw              NOTIFY attitudeChanged)
+
+    Q_PROPERTY(float   depth            READ depth            NOTIFY vfrHudChanged)
+    Q_PROPERTY(float   groundspeed      READ groundspeed      NOTIFY vfrHudChanged)
+    Q_PROPERTY(float   heading          READ heading          NOTIFY vfrHudChanged)
+    Q_PROPERTY(int     throttle         READ throttle         NOTIFY vfrHudChanged)
+
+    Q_PROPERTY(double  latitude         READ latitude         NOTIFY gpsChanged)
+    Q_PROPERTY(double  longitude        READ longitude        NOTIFY gpsChanged)
+    Q_PROPERTY(int     gpsSatCount      READ gpsSatCount      NOTIFY gpsChanged)
+    Q_PROPERTY(float   gpsHdop          READ gpsHdop          NOTIFY gpsChanged)
+
+    Q_PROPERTY(bool    armed            READ armed            NOTIFY armedChanged)
+    Q_PROPERTY(QString flightMode       READ flightMode       NOTIFY flightModeChanged)
+    Q_PROPERTY(bool    heartbeatOk      READ heartbeatOk      NOTIFY heartbeatStatusChanged)
+
+    Q_PROPERTY(quint16 dropRateComm     READ dropRateComm     NOTIFY linkQualityChanged)
+    Q_PROPERTY(quint16 errorsComm       READ errorsComm       NOTIFY linkQualityChanged)
+    Q_PROPERTY(quint8  rssi             READ rssi             NOTIFY linkQualityChanged)
+    Q_PROPERTY(quint8  remRssi          READ remRssi          NOTIFY linkQualityChanged)
+    Q_PROPERTY(bool    hasRadioStatus   READ hasRadioStatus   NOTIFY linkQualityChanged)
+
 public:
     explicit VehicleState(QObject* parent = nullptr);
 
+    int    sysid()            const { return _sysid; }
     int    batteryRemaining() const { return _batteryRemaining; }
     float  voltage()          const { return _voltage; }
     float  current()          const { return _current; }
@@ -58,6 +89,9 @@ public slots:
     void updateGpsRaw(int satCount, float hdop);
     void updateHeartbeat(bool armed, uint32_t customMode);
     void updateRadioStatus(uint8_t rssi, uint8_t remRssi);
+    // 활성 차량이 바뀌면 호출. 모든 telemetry를 초기값으로 리셋해 stale 표시 방지.
+    void setSysid(int sysid);
+    void resetTelemetry();
 
 signals:
     void batteryChanged();
@@ -68,8 +102,11 @@ signals:
     void flightModeChanged();
     void heartbeatStatusChanged();
     void linkQualityChanged();
+    void sysidChanged();
 
 private:
+    int    _sysid            = 0;   // 0 = 미정 (HEARTBEAT 받기 전)
+
     int    _batteryRemaining = -1;
     float  _voltage          = 0.0f;
     float  _current          = 0.0f;

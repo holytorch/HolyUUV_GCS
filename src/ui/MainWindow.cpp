@@ -1,4 +1,5 @@
 #include "MainWindow.h"
+#include "terrain/TerrainScene.h"
 #include <QWidget>
 #include <QHBoxLayout>
 #include <QVBoxLayout>
@@ -27,7 +28,7 @@ void MainWindow::_setupUi()
     rootLayout->setContentsMargins(4, 4, 4, 4);
     rootLayout->setSpacing(4);
 
-    // ── 중앙 영역: 좌(HUD) + 중(지도) + 우(3D) ──────────────────
+    // ── 중앙 영역: 좌(HUD) ───────────────────────────────────────
     QHBoxLayout* midLayout = new QHBoxLayout();
     midLayout->setSpacing(4);
 
@@ -39,13 +40,7 @@ void MainWindow::_setupUi()
     _hudWidget->setFixedWidth(480);
     midLayout->addWidget(_hudWidget);
 
-    // 중앙: (비어 있음 — 추후 다른 위젯 배치 예정)
     midLayout->addStretch(1);
-
-    // 우측: 3D Terrain
-    _terrainWidget = new TerrainWidget(root);
-    _terrainWidget->setFixedWidth(440);
-    midLayout->addWidget(_terrainWidget);
 
     rootLayout->addLayout(midLayout, 1);
 
@@ -54,8 +49,26 @@ void MainWindow::_setupUi()
     _joystickWidget->setFixedHeight(600);
     rootLayout->addWidget(_joystickWidget);
 
+    // Mission 탭: QML이 모든 모드를 자체 렌더링.
+    // 3D 모드일 때 QML의 Scene3D 컴포넌트가 missionTerrainScene의 entity 트리를 합성.
+    _missionTerrainScene = new TerrainScene(this);
+
+    // 로그 피드 (VehicleState 신호 구독해서 의미있는 이벤트만 누적)
+    _logFeed = new LogFeed(_state, this);
+
+    // QML → MAVLink 송신 브리지 (ARM, 모드 변경 등). Application이 시그널을 wire.
+    _commander = new VehicleCommander(this);
+
+    // QML → LinkManager 연결 브리지 (UDP connect/disconnect).
+    _connection = new ConnectionBridge(this);
+
     QQuickWidget* missionWidget = new QQuickWidget(this);
     missionWidget->rootContext()->setContextProperty("bridge", &_mapBridge);
+    missionWidget->rootContext()->setContextProperty("missionTerrainScene", _missionTerrainScene);
+    missionWidget->rootContext()->setContextProperty("logFeed", _logFeed);
+    missionWidget->rootContext()->setContextProperty("vehicle", _state);
+    missionWidget->rootContext()->setContextProperty("commander", _commander);
+    missionWidget->rootContext()->setContextProperty("connection", _connection);
     missionWidget->setSource(QUrl("qrc:/qml/MissionView.qml"));
     missionWidget->setResizeMode(QQuickWidget::SizeRootObjectToView);
 
@@ -81,5 +94,7 @@ void MainWindow::_setupUi()
 void MainWindow::onGpsChanged()
 {
     _mapBridge.updatePosition(_state->latitude(), _state->longitude());
-    _terrainWidget->updateVehiclePosition(_state->latitude(), _state->longitude());
+    if (_missionTerrainScene)
+        _missionTerrainScene->updateVehiclePosition(
+            _state->latitude(), _state->longitude());
 }

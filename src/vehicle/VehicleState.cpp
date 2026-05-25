@@ -144,3 +144,44 @@ void VehicleState::updateHeartbeat(bool armed, uint32_t customMode)
         emit heartbeatStatusChanged();
     }
 }
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// setSysid()
+// MavlinkManager가 첫 HEARTBEAT에서 sysid를 latch하면 호출.
+// 사용자가 트리에서 다른 sysid 선택해도 호출되어 UI가 그 차량으로 mirror됨.
+// ─────────────────────────────────────────────────────────────────────────────
+void VehicleState::setSysid(int sysid)
+{
+    if (_sysid == sysid) return;
+    _sysid = sysid;
+    emit sysidChanged();
+}
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// resetTelemetry()
+// 연결 해제 / 활성 차량 전환 시 호출. 모든 텔레메트리를 초기값으로 되돌려
+// stale 표시(예: 이전 차량 batt %)가 남지 않도록 한다.
+// sysid는 별도 setSysid로 관리.
+// ─────────────────────────────────────────────────────────────────────────────
+void VehicleState::resetTelemetry()
+{
+    _batteryRemaining = -1; _voltage = 0; _current = 0;
+    _roll = 0; _pitch = 0; _yaw = 0;
+    _depth = 0; _groundspeed = 0; _heading = 0; _throttle = 0;
+    _latitude = 0; _longitude = 0; _gpsSatCount = 0; _gpsHdop = 99.9f;
+    _armed = false; _flightMode = "Unknown"; _heartbeatOk = false;
+    _heartbeatElapsed.invalidate();
+    _dropRateComm = 0; _errorsComm = 0;
+    _rssi = 0; _remRssi = 0; _hasRadioStatus = false;
+
+    emit batteryChanged();
+    emit attitudeChanged();
+    emit vfrHudChanged();
+    emit gpsChanged();
+    emit armedChanged();
+    emit flightModeChanged();
+    emit heartbeatStatusChanged();
+    emit linkQualityChanged();
+}

@@ -2,6 +2,8 @@
 
 #include <QObject>
 #include <QByteArray>
+#include <QSet>
+#include <QTimer>
 #include <cstdint>
 
 #ifdef MAVLINK_AVAILABLE
@@ -46,12 +48,6 @@ struct MavlinkRadioStatus {
     uint16_t rxErrors  = 0;    // 수신 오류 수
 };
 
-struct MavlinkScaledPressure {
-    float   pressureAbs  = 0.0f;  // hPa
-    float   pressureDiff = 0.0f;  // hPa
-    int16_t temperature  = 0;     // cdeg C
-};
-
 struct MavlinkVfrHud {
     float groundspeed = 0.0f;  // m/s
     float altitude    = 0.0f;  // m (수중 로봇은 음수 = 수심)
@@ -86,17 +82,33 @@ public slots:
     void parseBytes(const QByteArray& data);
     void sendManualControl(int16_t x, int16_t y, int16_t z, int16_t r, uint16_t buttons);
     void sendArmDisarm(bool arm);
+    // ArduSub custom_mode 변경. base_mode에 CUSTOM_MODE_ENABLED 비트 켜고
+    // custom_mode 필드로 모드 번호 전달 (예: MANUAL=19, STABILIZE=0, ALT_HOLD=2).
+    void sendSetMode(uint32_t customMode);
+    // 연결 해제 시 호출. 감지된 sysid 목록과 active 모두 초기화.
+    void resetVehicleLatch();
+    // 사용자가 활성 차량 변경. HEARTBEAT/제어 송신의 target sysid가 된다.
+    void setActiveSysid(int sysid);
+    // 링크 연결/해제 시 호출. GCS HEARTBEAT 타이머와 차량 watchdog를 제어.
+    void startHeartbeat();
+    void stopHeartbeat();
 
 signals:
     void heartbeatReceived(const MavlinkHeartbeat& hb);
     void bytesToSend(const QByteArray& data);
     void attitudeReceived(const MavlinkAttitude& att);
     void sysStatusReceived(const MavlinkSysStatus& status);
-    void scaledPressureReceived(const MavlinkScaledPressure& pressure);
     void vfrHudReceived(const MavlinkVfrHud& hud);
     void globalPositionReceived(const MavlinkGlobalPosition& pos);
     void gpsRawReceived(const MavlinkGpsRaw& gps);
     void radioStatusReceived(const MavlinkRadioStatus& radio);
+
+    // 새 sysid의 HEARTBEAT가 처음 수신될 때 발신 (UI 트리에 추가용).
+    void sysidDetected(int sysid);
+    // 활성 sysid 변경 (외부 setActiveSysid 또는 첫 자동 latch). HUD 리셋 트리거.
+    void activeSysidChanged(int sysid);
+    // 차량 HEARTBEAT가 5초 이상 수신되지 않으면 발신 → 자동 disconnect.
+    void vehicleTimedOut();
 
 private:
 #ifdef MAVLINK_AVAILABLE
@@ -107,12 +119,19 @@ private:
     mavlink_message_t _message = {};
 #endif
 
-    // 디버깅: 첫 HEARTBEAT / 첫 MANUAL_CONTROL 송신 로그용 (1회만)
-    bool _loggedFirstHeartbeat     = false;
+    // 디버깅: 첫 MANUAL_CONTROL 송신 로그용 (1회만)
     bool _loggedFirstManualControl = false;
 
-    // 첫 autopilot HEARTBEAT에서 latch — 모든 송신의 target sysid/compid.
-    // 하드코딩 1로 두면 ArduSub이 다른 sysid일 때 명령 묵살.
-    uint8_t _targetSysid  = 1;
+    // 감지된 모든 sysid (HEARTBEAT 송신 차량). 한 연결에 여러 sysid가 섞일 수 있음.
+    QSet<uint8_t> _detectedSysids;
+
+    // 활성 차량 sysid — 0이면 미정. 첫 HEARTBEAT에서 자동 latch되거나,
+    // 사용자가 setActiveSysid로 변경. 모든 송신의 target.
+    uint8_t _activeSysid  = 0;
     uint8_t _targetCompid = 1;
+
+    // GCS HEARTBEAT 1Hz 타이머 (ArduSub에게 GCS 존재 알림)
+    QTimer* _gcsHeartbeatTimer  = nullptr;
+    // 차량 HEARTBEAT 수신 watchdog — 5초 단발 타이머
+    QTimer* _vehicleWatchdog    = nullptr;
 };

@@ -4,42 +4,129 @@ import QtQuick.Layouts 1.12
 import QtGraphicalEffects 1.12
 import QtLocation 5.12
 import QtPositioning 5.12
+import QtQuick.Scene3D 2.0
+import Qt3D.Core 2.0
+import Qt3D.Render 2.0
+import Qt3D.Extras 2.0
+import Qt3D.Input 2.0
 
 Rectangle {
+    id: root
     anchors.fill: parent
     color: "#0d1620"
 
     // 맵 모드: "osm" / "voyager" / "3d"
+    // onMapModeChanged 핸들러는 아래 Loader 블록에서 통합 처리
+    // (latch 플래그 갱신 + bridge 알림).
     property string mapMode: "osm"
 
     // 두 맵이 공유하는 center/zoom (토글 시 위치/줌 유지)
     property var mapCenter: QtPositioning.coordinate(35.074857, 129.084836)
     property real mapZoom: 15
 
-    // ── 배경: 한 번에 한 맵만 로드 (메모리 절약) ─────────────────
+    // ── 모드별 Loader: 한 번 로드되면 unload하지 않고 visible만 토글 ──
+    // 모드 전환 시 컴포넌트 destroy/recreate를 피해서:
+    //   1. 카메라 위치/지도 줌 상태 보존
+    //   2. 3D entity 트리 dangling 방지 (이전 세그폴트 원인)
+    //   3. 타일 재fetch 방지
+    // 메모리 trade-off: 처음 들어간 모드의 컴포넌트가 계속 메모리에 남는다.
+
     Loader {
-        id: mapLoader
+        id: osmLoader
         anchors.fill: parent
-        sourceComponent: {
-            if (mapMode === "voyager") return voyagerComponent
-            if (mapMode === "3d")      return terrain3dComponent
-            return osmComponent
-        }
+        sourceComponent: osmComponent
+        active: true                       // 디폴트 모드라 시작부터 로드
+        visible: mapMode === "osm"
     }
 
-    // 3D 모드 placeholder (실제 Qt3D 위젯은 추후 연동)
+    Loader {
+        id: voyagerLoader
+        anchors.fill: parent
+        sourceComponent: voyagerComponent
+        active: mapMode === "voyager" || _voyagerEverActive
+        visible: mapMode === "voyager"
+    }
+
+    Loader {
+        id: terrain3dLoader
+        anchors.fill: parent
+        sourceComponent: terrain3dComponent
+        active: mapMode === "3d" || _terrain3dEverActive
+        visible: mapMode === "3d"
+    }
+
+    // 한 번이라도 active 였는지 추적 → 다시 false로 안 떨어지게 latch
+    property bool _voyagerEverActive: false
+    property bool _terrain3dEverActive: false
+    onMapModeChanged: {
+        if (mapMode === "voyager") _voyagerEverActive = true
+        if (mapMode === "3d")      _terrain3dEverActive = true
+        if (bridge) bridge.setMapMode(mapMode)
+    }
+
+    // 3D 모드: Scene3D에 C++ TerrainScene의 entity 트리를 reparent하여 렌더링.
+    // QML 자체 합성이므로 카드/로그/조이스틱 등 다른 컨트롤이 자연스럽게 위에 보임.
     Component {
         id: terrain3dComponent
-        Rectangle {
-            color: "#0a1018"
-            Text {
-                anchors.centerIn: parent
-                text: "3D TERRAIN\n(coming soon)"
-                color: "#5a6770"
-                font.pixelSize: 18
-                font.weight: Font.DemiBold
-                font.letterSpacing: 1.5
-                horizontalAlignment: Text.AlignHCenter
+        Scene3D {
+            id: terrainScene3d
+            aspects: ["input", "logic"]
+            cameraAspectRatioMode: Scene3D.AutomaticAspectRatio
+            multisample: true
+            focus: true
+
+            Entity {
+                id: scene3dRoot
+
+                Camera {
+                    id: terrainCam
+                    projectionType: CameraLens.PerspectiveProjection
+                    fieldOfView: 60
+                    nearPlane: 0.1
+                    farPlane: 10000
+                    position: Qt.vector3d(0, 179, 128)
+                    upVector: Qt.vector3d(0, 1, 0)
+                    viewCenter: Qt.vector3d(0, 0, 0)
+                }
+
+                OrbitCameraController {
+                    camera: terrainCam
+                    linearSpeed: -400
+                    lookSpeed: -180
+                }
+
+                components: [
+                    RenderSettings {
+                        activeFrameGraph: ForwardRenderer {
+                            clearColor: "#0f121e"
+                            camera: terrainCam
+                        }
+                    },
+                    InputSettings {}
+                ]
+
+                // 방향 조명
+                Entity {
+                    components: [
+                        DirectionalLight {
+                            worldDirection: Qt.vector3d(-0.3, -1.0, -0.5)
+                            color: "white"
+                            intensity: 1.5
+                        }
+                    ]
+                }
+
+                Component.onCompleted: {
+                    if (missionTerrainScene) {
+                        missionTerrainScene.setCamera(terrainCam)
+                        // attachTo는 entity 부착만 (캐시 있으면 mesh 즉시 rebuild)
+                        missionTerrainScene.attachTo(scene3dRoot)
+                        // 캐시 없으면 첫 fetch 명시적으로 트리거.
+                        // (TileServer는 이미 listening 시작했음 — 사용자가 3D 모드를 누른 시점이라)
+                        if (!missionTerrainScene.hasTerrainData())
+                            missionTerrainScene.loadTile(35.074857, 129.084836, 17)
+                    }
+                }
             }
         }
     }
@@ -47,6 +134,7 @@ Rectangle {
     Component {
         id: osmComponent
         Map {
+            id: osmMap
             plugin: Plugin {
                 name: "osm"
                 PluginParameter {
@@ -60,19 +148,28 @@ Rectangle {
                 PluginParameter { name: "osm.mapping.cache.disk.cost_strategy"; value: "unitary" }
             }
 
-            center: mapCenter
-            zoomLevel: mapZoom
-
-            onCenterChanged:    mapCenter = center
-            onZoomLevelChanged: mapZoom   = zoomLevel
+            // 양방향 바인딩 루프 방지:
+            //   center: mapCenter  +  onCenterChanged: mapCenter = center → QML이 loop 감지
+            // 초기값은 onCompleted에서 한 번만 세팅, 이후엔 user gesture → mapCenter 단방향.
+            onCenterChanged:    if (mapCenter !== center)  mapCenter = center
+            onZoomLevelChanged: if (mapZoom   !== zoomLevel) mapZoom   = zoomLevel
 
             Component.onCompleted: {
+                center    = mapCenter
+                zoomLevel = mapZoom
                 for (var i = 0; i < supportedMapTypes.length; i++) {
                     if (supportedMapTypes[i].style === MapType.CustomMap) {
                         activeMapType = supportedMapTypes[i]
                         break
                     }
                 }
+            }
+            // 외부에서 mapCenter/mapZoom이 변경되면 (다른 모드에서 갱신된 값)
+            // 우리도 따라가되, 같은 값이면 set 안 해서 루프 방지.
+            Connections {
+                target: root
+                function onMapCenterChanged() { if (osmMap.center !== mapCenter) osmMap.center = mapCenter }
+                function onMapZoomChanged()   { if (osmMap.zoomLevel !== mapZoom) osmMap.zoomLevel = mapZoom }
             }
 
             MapQuickItem {
@@ -95,6 +192,7 @@ Rectangle {
     Component {
         id: voyagerComponent
         Map {
+            id: voyagerMap
             plugin: Plugin {
                 name: "osm"
                 PluginParameter {
@@ -108,19 +206,23 @@ Rectangle {
                 PluginParameter { name: "osm.mapping.cache.disk.cost_strategy"; value: "unitary" }
             }
 
-            center: mapCenter
-            zoomLevel: mapZoom
-
-            onCenterChanged:    mapCenter = center
-            onZoomLevelChanged: mapZoom   = zoomLevel
+            onCenterChanged:    if (mapCenter !== center)  mapCenter = center
+            onZoomLevelChanged: if (mapZoom   !== zoomLevel) mapZoom   = zoomLevel
 
             Component.onCompleted: {
+                center    = mapCenter
+                zoomLevel = mapZoom
                 for (var i = 0; i < supportedMapTypes.length; i++) {
                     if (supportedMapTypes[i].style === MapType.CustomMap) {
                         activeMapType = supportedMapTypes[i]
                         break
                     }
                 }
+            }
+            Connections {
+                target: root
+                function onMapCenterChanged() { if (voyagerMap.center !== mapCenter) voyagerMap.center = mapCenter }
+                function onMapZoomChanged()   { if (voyagerMap.zoomLevel !== mapZoom) voyagerMap.zoomLevel = mapZoom }
             }
 
             MapQuickItem {
@@ -176,12 +278,13 @@ Rectangle {
         }
     }
 
-    // 차량 목록 (목데이터 — 나중에 C++ 모델로 교체)
+    // 저장된 연결 엔트리 목록 (host:port). 사용자가 Add Connection으로 추가.
+    // 실제 연결 상태는 connection 브리지(C++)가 관리하고 QML은 mirror만 함.
+    // 한 번에 한 연결만 active (Phase 1: LinkManager single-link).
     ListModel {
-        id: vehiclesModel
-        // 초기에는 비어있음. Add Vehicle로 추가.
+        id: connectionsModel
+        // 항목 스키마: { host: string, port: int, type: string ("UDP"/"TCP") }
     }
-    property int activeVehicleIndex: -1
 
     // 로고 우측: SysID 카드 (클릭 시 차량 목록 팝업 토글)
     Rectangle {
@@ -206,9 +309,15 @@ Rectangle {
             spacing: 20
 
             Text {
-                text: activeVehicleIndex >= 0
-                    ? "sys_id: " + vehiclesModel.get(activeVehicleIndex).sysid
-                    : "sys_id : -"
+                // 활성 sysid가 0이면 미정 — 연결 안 됐거나 HEARTBEAT 대기 중.
+                // 0이 아니면 실제 sysid 표시. VehicleState.sysid는 active sysid를 mirror.
+                text: {
+                    if (!vehicle || vehicle.sysid === 0) {
+                        if (connection && connection.connected) return "sys_id : detecting…"
+                        return "sys_id : -"
+                    }
+                    return "sys_id: " + vehicle.sysid
+                }
                 color: "#cccccc"
                 font.pixelSize: 12
                 font.letterSpacing: 0.6
@@ -265,85 +374,113 @@ Rectangle {
 
                 Text {
                     padding: 14
-                    text: "VEHICLES"
+                    text: "CONNECTIONS"
                     color: "#8faabc"
                     font.pixelSize: 10
                     font.letterSpacing: 1.2
                 }
 
-                // 차량 리스트
+                // 연결 리스트 — 각 엔트리는 host:port + Connect/Disconnect 버튼,
+                // 활성 연결의 경우 그 아래로 감지된 sysid 서브리스트가 펼쳐진다.
                 Repeater {
-                    model: vehiclesModel
-                    Rectangle {
+                    model: connectionsModel
+                    Column {
                         width: sysIdPopup.width
-                        height: 40
-                        color: ma.containsMouse ? "#B3243341" : "transparent"
 
-                        // 좌측: sysid 텍스트 (활성 선택 영역)
-                        Item {
-                            id: vehicleSelArea
-                            anchors.left: parent.left
-                            anchors.top: parent.top
-                            anchors.bottom: parent.bottom
-                            anchors.right: connBtn.left
-                            anchors.leftMargin: 14
-                            anchors.rightMargin: 6
+                        // 1) 연결 행 (host:port + 버튼)
+                        Rectangle {
+                            width: parent.width
+                            height: 40
+                            // 이 엔트리가 현재 활성 연결인지 — host:port 일치 + connected
+                            property bool isActive: connection
+                                && connection.connected
+                                && connection.currentHost === host
+                                && connection.currentPort === port
+                            color: connRowMa.containsMouse ? "#B3243341" : "transparent"
 
-                            Row {
-                                anchors.fill: parent
-                                spacing: 6
+                            Text {
+                                anchors.left: parent.left
+                                anchors.verticalCenter: parent.verticalCenter
+                                anchors.leftMargin: 14
+                                text: type.toLowerCase() + " " + host + ":" + port
+                                color: "#cccccc"
+                                font.pixelSize: 12
+                                font.family: "monospace"
+                            }
+                            // Connect/Disconnect 버튼
+                            Rectangle {
+                                anchors.right: parent.right
+                                anchors.verticalCenter: parent.verticalCenter
+                                anchors.rightMargin: 10
+                                width: 84; height: 24
+                                radius: 8
+                                color: connBtnMa.containsMouse
+                                    ? (parent.isActive ? "#c93030" : "#3eaedb")
+                                    : (parent.isActive ? "#a82424" : "#61d3ff")
+                                antialiasing: true
                                 Text {
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    text: index === activeVehicleIndex ? "✓" : "  "
-                                    color: "#44bb44"
-                                    font.pixelSize: 12
-                                    width: 12
+                                    anchors.centerIn: parent
+                                    text: parent.parent.isActive ? "Disconnect" : "Connect"
+                                    color: parent.parent.isActive ? "#ffffff" : "#0d1620"
+                                    font.pixelSize: 11
+                                    font.weight: Font.DemiBold
                                 }
-                                Text {
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    text: "sysid: " + sysid
-                                    color: "#cccccc"
-                                    font.pixelSize: 12
-                                    font.family: "monospace"
+                                MouseArea {
+                                    id: connBtnMa
+                                    anchors.fill: parent
+                                    hoverEnabled: true
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: {
+                                        if (parent.parent.isActive) connection.disconnectLink()
+                                        else connection.connectUdp(host, port)
+                                    }
                                 }
                             }
-
                             MouseArea {
-                                id: ma
+                                id: connRowMa
                                 anchors.fill: parent
                                 hoverEnabled: true
-                                onClicked: activeVehicleIndex = index
+                                acceptedButtons: Qt.NoButton  // 버튼 클릭 우회용
                             }
                         }
 
-                        // 우측: Connect / Disconnect 버튼
-                        Rectangle {
-                            id: connBtn
-                            anchors.right: parent.right
-                            anchors.verticalCenter: parent.verticalCenter
-                            anchors.rightMargin: 10
-                            width: 84; height: 24
-                            radius: 8
-                            color: connBtnMa.containsMouse
-                                   ? (connected ? "#c93030" : "#3eaedb")
-                                   : (connected ? "#a82424" : "#61d3ff")
-                            antialiasing: true
-
-                            Text {
-                                anchors.centerIn: parent
-                                text: connected ? "Disconnect" : "Connect"
-                                color: connected ? "#ffffff" : "#0d1620"
-                                font.pixelSize: 11
-                                font.weight: Font.DemiBold
-                            }
-
-                            MouseArea {
-                                id: connBtnMa
-                                anchors.fill: parent
-                                hoverEnabled: true
-                                onClicked: {
-                                    // 목데이터: 연결 상태 토글
-                                    vehiclesModel.setProperty(index, "connected", !connected)
+                        // 2) 활성 연결이면 감지된 sysid 서브리스트
+                        Repeater {
+                            // connection 객체에서 detectedSysids를 가져오되, 이 엔트리가
+                            // 활성 연결일 때만. 활성 아니면 빈 배열.
+                            model: (connection && connection.connected
+                                    && connection.currentHost === host
+                                    && connection.currentPort === port)
+                                   ? connection.detectedSysids : []
+                            Rectangle {
+                                width: sysIdPopup.width
+                                height: 28
+                                color: sysMa.containsMouse ? "#B3243341" : "transparent"
+                                Row {
+                                    anchors.fill: parent
+                                    anchors.leftMargin: 36   // 들여쓰기로 트리 표현
+                                    spacing: 6
+                                    Text {
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        text: connection.activeSysid === modelData ? "✓" : "  "
+                                        color: "#44bb44"
+                                        font.pixelSize: 12
+                                        width: 12
+                                    }
+                                    Text {
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        text: "sysid: " + modelData
+                                        color: "#cccccc"
+                                        font.pixelSize: 11
+                                        font.family: "monospace"
+                                    }
+                                }
+                                MouseArea {
+                                    id: sysMa
+                                    anchors.fill: parent
+                                    hoverEnabled: true
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: connection.setActiveSysid(modelData)
                                 }
                             }
                         }
@@ -356,7 +493,7 @@ Rectangle {
                     color: "#2a3540"
                 }
 
-                // + Add Vehicle
+                // + Add Connection
                 Rectangle {
                     width: sysIdPopup.width
                     height: 40
@@ -366,7 +503,7 @@ Rectangle {
                         anchors.fill: parent
                         anchors.leftMargin: 14
                         verticalAlignment: Text.AlignVCenter
-                        text: "＋  Add Vehicle"
+                        text: "＋  Add Connection"
                         color: "#61d3ff"
                         font.pixelSize: 12
                     }
@@ -386,7 +523,7 @@ Rectangle {
         }
     }
 
-    // ── Add Vehicle 모달 다이얼로그 ─────────────────────────────────
+    // ── Add Connection 모달 다이얼로그 ──────────────────────────────
     Popup {
         id: addVehicleDialog
         anchors.centerIn: parent
@@ -409,7 +546,7 @@ Rectangle {
             spacing: 14
 
             Text {
-                text: "Add Vehicle"
+                text: "Add Connection"
                 color: "#dfe9eb"
                 font.pixelSize: 14
                 font.weight: Font.DemiBold
@@ -474,7 +611,7 @@ Rectangle {
                 TextField {
                     id: portField
                     width: parent.width
-                    text: "14550"
+                    text: "14555"
                     color: "#dfe9eb"
                     font.pixelSize: 12
                     font.family: "monospace"
@@ -514,17 +651,12 @@ Rectangle {
                         anchors.fill: parent
                         hoverEnabled: true
                         onClicked: {
-                            // 목데이터: 목록에 추가 (실제 연결은 추후 C++ 연동)
-                            var nextSysid = vehiclesModel.count + 1
-                            vehiclesModel.append({
-                                sysid: nextSysid,
-                                name: "",
+                            // 연결 엔트리 저장만 — 실제 연결은 사용자가 리스트에서 Connect 클릭 시
+                            connectionsModel.append({
                                 host: hostField.text,
-                                port: portField.text,
-                                type: addVehicleDialog.connType,
-                                connected: false
+                                port: parseInt(portField.text),
+                                type: addVehicleDialog.connType
                             })
-                            activeVehicleIndex = vehiclesModel.count - 1
                             addVehicleDialog.close()
                         }
                     }
@@ -536,7 +668,7 @@ Rectangle {
     // SysID 우측: 링크 상태 카드 (텍스트 길이에 따라 가변폭)
     Rectangle {
         id: linkCard
-        property bool linkOk: false   // 추후 VehicleState::heartbeatOk 바인딩
+        property bool linkOk: vehicle ? vehicle.heartbeatOk : false
 
         anchors.top: parent.top
         anchors.left: sysIdCard.right
@@ -578,7 +710,7 @@ Rectangle {
     // Link 우측: ARM 상태 카드
     Rectangle {
         id: armCard
-        property bool armed: false   // 추후 VehicleState::armed 바인딩
+        property bool armed: vehicle ? vehicle.armed : false
 
         anchors.top: parent.top
         anchors.left: linkCard.right
@@ -636,7 +768,16 @@ Rectangle {
 
         Text {
             anchors.centerIn: parent
-            text: "46.4883333° N,  30.7397123° E"
+            // GPS 좌표. 미수신(0,0) 또는 vehicle 없음이면 "---"로 표기.
+            text: {
+                if (!vehicle) return "—"
+                var lat = vehicle.latitude, lon = vehicle.longitude
+                if (lat === 0 && lon === 0) return "---° N,  ---° E"
+                var latHem = lat >= 0 ? "N" : "S"
+                var lonHem = lon >= 0 ? "E" : "W"
+                return Math.abs(lat).toFixed(7) + "° " + latHem
+                     + ",  " + Math.abs(lon).toFixed(7) + "° " + lonHem
+            }
             color: "#cccccc"
             font.pixelSize: 12
             font.weight: Font.Normal
@@ -651,7 +792,7 @@ Rectangle {
         anchors.top: parent.top
         anchors.horizontalCenter: parent.horizontalCenter
         anchors.topMargin: 16
-        heading: 15.4
+        heading: vehicle ? vehicle.heading : 0
     }
 
     // GPS 카드 밑: 다크/라이트 맵 토글 버튼
@@ -801,6 +942,7 @@ Rectangle {
     // 입력 : 직접 값 입력 (0.1 단위)
     Column {
         id: zoomControl
+        visible: mapMode !== "3d"
         anchors.bottom: depthGauge.top
         anchors.right: parent.right
         anchors.bottomMargin: 22
@@ -941,10 +1083,24 @@ Rectangle {
                     padding: 14
 
                     Text { text: "GPS STATUS"; color: "#8faabc"; font.pixelSize: 10; font.letterSpacing: 1.2 }
-                    Text { text: "Fix:         3D";   color: "#cccccc"; font.pixelSize: 12; font.family: "monospace" }
-                    Text { text: "Satellites:  12";   color: "#cccccc"; font.pixelSize: 12; font.family: "monospace" }
-                    Text { text: "HDOP:        0.8";  color: "#cccccc"; font.pixelSize: 12; font.family: "monospace" }
-                    Text { text: "VDOP:        1.2";  color: "#cccccc"; font.pixelSize: 12; font.family: "monospace" }
+                    Text {
+                        // 위성 3개 이상 + 좌표 != 0 이면 3D fix로 본다 (간단 판단)
+                        text: {
+                            if (!vehicle) return "Fix:         —"
+                            var fix = (vehicle.gpsSatCount >= 3 && (vehicle.latitude !== 0 || vehicle.longitude !== 0))
+                                      ? "3D" : "No fix"
+                            return "Fix:         " + fix
+                        }
+                        color: "#cccccc"; font.pixelSize: 12; font.family: "monospace"
+                    }
+                    Text {
+                        text: "Satellites:  " + (vehicle ? vehicle.gpsSatCount : 0)
+                        color: "#cccccc"; font.pixelSize: 12; font.family: "monospace"
+                    }
+                    Text {
+                        text: "HDOP:        " + (vehicle ? vehicle.gpsHdop.toFixed(1) : "—")
+                        color: "#cccccc"; font.pixelSize: 12; font.family: "monospace"
+                    }
                 }
             }
         }
@@ -1003,39 +1159,45 @@ Rectangle {
     }
 
     // ── 지도 위 떠 있는 조이스틱 (좌: Strafe/Fwd, 우: Yaw/Heave) ────
-    Rectangle {
-        id: leftJoystick
+    // Operations 탭 JoystickWidget과 동일한 축 매핑/deadband.
+    // 각 패드의 정규화 (x, y)를 root.leftX/leftY/rightX/rightY로 보관 →
+    // 아래 manualControlTimer가 50Hz로 MANUAL_CONTROL 패킷 발신.
+    property real leftX:  0
+    property real leftY:  0
+    property real rightX: 0
+    property real rightY: 0
+
+    MissionStickPad {
+        id: leftStickPad
         visible: joystickVisible
         anchors.bottom: bottomBar.top
         anchors.left: bottomBar.left
         anchors.bottomMargin: 12
         anchors.leftMargin: 60
         width: 110; height: 110
-        radius: 55
-        color: "#B31a2530"
-        border.color: "#2a3540"
-        border.width: 1
-        antialiasing: true
-        layer.enabled: true
-        layer.samples: 8
+        labelText: "Strafe / Fwd"
+        onStickChanged: { root.leftX = x; root.leftY = y }
+    }
 
-        Rectangle {
-            anchors.centerIn: parent
-            width: 32; height: 32; radius: 16
-            color: "#2a3540"
-            border.color: "#4a5560"
-            border.width: 1
-            antialiasing: true
-        }
-
-        Text {
-            anchors.horizontalCenter: parent.horizontalCenter
-            anchors.bottom: parent.top
-            anchors.bottomMargin: 4
-            text: "Strafe / Fwd"
-            color: "#cccccc"
-            font.pixelSize: 10
-            font.letterSpacing: 0.6
+    // 50Hz로 MANUAL_CONTROL 송신 — Operations 탭 JoystickWidget과 동일 주기.
+    // 연결됐을 때만 실행. 스틱이 중립이어도 계속 보내야 ArduSub이 GCS 연결로 인식.
+    Timer {
+        id: manualControlTimer
+        interval: 20
+        repeat: true
+        running: connection && connection.connected
+        onTriggered: {
+            if (!commander) return
+            // 축 매핑 (JoystickWidget.h 주석 그대로):
+            //   x = -axes[1]*1000 = -leftY*1000  (위로 밀면 전진)
+            //   y = -axes[0]*1000 =  leftX*1000  (오른쪽 = 우측 strafe)
+            //   z = (1 - axes[5]) / 2 * 1000      (위=상승, 중립=500)
+            //   r = -axes[4]*1000 =  rightX*1000  (오른쪽 = 우회전)
+            var mcX = Math.round(-leftY  * 1000)
+            var mcY = Math.round( leftX  * 1000)
+            var mcZ = Math.round((1 - rightY) / 2 * 1000)
+            var mcR = Math.round( rightX * 1000)
+            commander.sendManualControl(mcX, mcY, mcZ, mcR, 0)
         }
     }
 
@@ -1046,11 +1208,13 @@ Rectangle {
         anchors.bottomMargin: 12
         anchors.rightMargin: 16
         width: 170; height: 170
-        rollDeg: 0
-        pitchDeg: 0
+        // VehicleState는 라디안으로 저장 → 도(°) 변환
+        rollDeg:  vehicle ? vehicle.roll  * 180 / Math.PI : 0
+        pitchDeg: vehicle ? vehicle.pitch * 180 / Math.PI : 0
     }
 
     // 수심 게이지 (롤/피치 게이지 위, 동일 우측 마진)
+    // VFR_HUD.alt는 해수면 기준 음수 (수중일 때) — 게이지는 양수 magnitude를 받음
     DepthGauge {
         id: depthGauge
         anchors.bottom: attitudeGauge.top
@@ -1058,44 +1222,20 @@ Rectangle {
         anchors.bottomMargin: 12
         anchors.rightMargin: 2
         width: 100; height: 160
-        depth: 5.4
+        depth: vehicle ? Math.max(0, -vehicle.depth) : 0
         maxDepth: 100
     }
 
-    Rectangle {
-        id: rightJoystick
+    MissionStickPad {
+        id: rightStickPad
         visible: joystickVisible
         anchors.bottom: bottomBar.top
         anchors.right: attitudeGauge.left
         anchors.rightMargin: 50
         anchors.bottomMargin: 12
         width: 110; height: 110
-        radius: 55
-        color: "#B31a2530"
-        border.color: "#2a3540"
-        border.width: 1
-        antialiasing: true
-        layer.enabled: true
-        layer.samples: 8
-
-        Rectangle {
-            anchors.centerIn: parent
-            width: 32; height: 32; radius: 16
-            color: "#2a3540"
-            border.color: "#4a5560"
-            border.width: 1
-            antialiasing: true
-        }
-
-        Text {
-            anchors.horizontalCenter: parent.horizontalCenter
-            anchors.bottom: parent.top
-            anchors.bottomMargin: 4
-            text: "Yaw / Heave"
-            color: "#cccccc"
-            font.pixelSize: 10
-            font.letterSpacing: 0.6
-        }
+        labelText: "Yaw / Heave"
+        onStickChanged: { root.rightX = x; root.rightY = y }
     }
 
     // ── 하단: 로그 + 텔레메트리 ─────────────────────────────────
@@ -1177,26 +1317,14 @@ Rectangle {
                     font.pixelSize: 11
                     font.family: "monospace"
                     wrapMode: Text.Wrap
-                    text:
-                        "[12:34:01] HEARTBEAT received sysid=1\n" +
-                        "[12:34:01] GPS Fix: 3D, sats=12\n" +
-                        "[12:34:02] ARMED\n" +
-                        "[12:34:03] MODE: Manual\n" +
-                        "[12:34:05] ATTITUDE roll=2.3° pitch=-1.4°\n" +
-                        "[12:34:06] BATTERY 85% 14.8V\n" +
-                        "[12:34:07] DEPTH 5.4m\n" +
-                        "[12:34:08] HEADING 15.4°\n" +
-                        "[12:34:09] THROTTLE 50%\n" +
-                        "[12:34:10] LINK OK\n" +
-                        "[12:34:11] ATTITUDE roll=3.1° pitch=-1.2°\n" +
-                        "[12:34:12] GPS HDOP 0.8\n" +
-                        "[12:34:13] BATTERY 84% 14.7V\n" +
-                        "[12:34:14] DEPTH 5.5m\n" +
-                        "[12:34:15] HEARTBEAT received sysid=1\n" +
-                        "[12:34:16] ATTITUDE roll=2.8° pitch=-1.5°\n" +
-                        "[12:34:17] BATTERY 84% 14.7V\n" +
-                        "[12:34:18] DEPTH 5.6m\n" +
-                        "[12:34:19] HEADING 16.1°\n"
+                    text: logFeed ? logFeed.text : ""
+
+                    // 새 로그가 추가되면 항상 맨 아래로 스크롤
+                    // contentHeight가 새 텍스트로 확정된 다음 프레임에 이동해야 하므로 Qt.callLater 사용
+                    onTextChanged: Qt.callLater(_scrollToBottom)
+                    function _scrollToBottom() {
+                        logFlick.contentY = Math.max(0, logFlick.contentHeight - logFlick.height)
+                    }
                 }
 
                 // 오른쪽 끝 세로 스크롤바
@@ -1309,8 +1437,15 @@ Rectangle {
                                         anchors.top: parent.top
                                         anchors.bottom: parent.bottom
                                         anchors.margins: 2
-                                        width: (parent.width - 4) * 0.85
-                                        color: "#eeeeee"
+                                        // 배터리 잔량(%)에 비례한 채움. 미수신(<0)은 0으로 표시.
+                                        width: {
+                                            var pct = (vehicle && vehicle.batteryRemaining >= 0)
+                                                      ? Math.max(0, Math.min(100, vehicle.batteryRemaining)) : 0
+                                            return (parent.width - 4) * pct / 100
+                                        }
+                                        // 30% 이하면 빨갛게
+                                        color: (vehicle && vehicle.batteryRemaining >= 0 && vehicle.batteryRemaining < 30)
+                                               ? "#ff6464" : "#eeeeee"
                                         radius: 1
                                     }
                                 }
@@ -1324,7 +1459,11 @@ Rectangle {
                             }
                         }
                         Text {
-                            text: "16.3hr"
+                            // 배터리 잔량(%) + 전압(V). 미수신 시 "—".
+                            text: {
+                                if (!vehicle || vehicle.batteryRemaining < 0) return "— %"
+                                return vehicle.batteryRemaining + "%  " + vehicle.voltage.toFixed(1) + "V"
+                            }
                             color: "#cccccc"
                             font.pixelSize: 14
                             anchors.verticalCenter: parent.verticalCenter
@@ -1363,7 +1502,10 @@ Rectangle {
                             }
                         }
                         Text {
-                            text: "13 km/h"
+                            // VFR_HUD.groundspeed는 m/s — km/h로 변환
+                            text: vehicle
+                                ? (vehicle.groundspeed * 3.6).toFixed(1) + " km/h"
+                                : "— km/h"
                             color: "#cccccc"
                             font.pixelSize: 14
                             anchors.verticalCenter: parent.verticalCenter
@@ -1393,20 +1535,23 @@ Rectangle {
                                     radius: 3
                                     antialiasing: true
                                 }
-                                // 채움 (50% 가정)
+                                // 채움 (현재 스로틀에 비례, 0~100%)
                                 Rectangle {
                                     anchors.left: parent.left
                                     anchors.right: parent.right
                                     anchors.bottom: parent.bottom
                                     anchors.margins: 2
-                                    height: (parent.height - 4) * 0.5
+                                    height: {
+                                        var pct = vehicle ? Math.max(0, Math.min(100, vehicle.throttle)) : 0
+                                        return (parent.height - 4) * pct / 100
+                                    }
                                     color: "#eeeeee"
                                     radius: 1
                                 }
                             }
                         }
                         Text {
-                            text: "50 %"
+                            text: (vehicle ? vehicle.throttle : 0) + " %"
                             color: "#cccccc"
                             font.pixelSize: 14
                             anchors.verticalCenter: parent.verticalCenter
@@ -1416,54 +1561,90 @@ Rectangle {
 
             }
 
-            // ── 조이스틱 토글 버튼 (컨트롤 센터 우상단, 정사각형) ────
-            Rectangle {
-                id: joystickToggleBtn
+            // ── 컨트롤 패널: ARM 토글 + 모드 버튼들 ────────────────
+            // armed 상태에 따라 ARM/DISARM 텍스트와 색이 바뀌는 단일 버튼,
+            // 그 아래로 MANUAL / STABILIZE / ALT_HOLD 모드 버튼.
+            // 현재 모드와 일치하는 버튼은 active 강조색.
+            Column {
+                id: controlPanel
                 anchors.top: parent.top
                 anchors.right: parent.right
+                anchors.bottom: parent.bottom
                 anchors.topMargin: 8
                 anchors.rightMargin: 8
-                width: 80; height: 80
-                radius: 12
-                color: jsToggleMa.containsMouse ? "#B3243341" : "#1f2a35"
-                border.color: "#2a3540"
-                border.width: 1
-                antialiasing: true
+                anchors.bottomMargin: 8
+                width: 100
+                spacing: 4
 
-                Column {
-                    anchors.centerIn: parent
-                    spacing: 6
-
-                    Rectangle {
-                        anchors.horizontalCenter: parent.horizontalCenter
-                        width: 32; height: 32; radius: 16
-                        color: "#0d1620"
-                        border.color: joystickVisible ? "#61d3ff" : "#4a5560"
-                        border.width: 1.5
-                        antialiasing: true
-                        Rectangle {
-                            anchors.centerIn: parent
-                            width: 12; height: 12; radius: 6
-                            color: joystickVisible ? "#61d3ff" : "#5a6770"
-                        }
-                    }
+                // ARM/DISARM 토글
+                Rectangle {
+                    width: parent.width; height: 36
+                    radius: 8
+                    property bool isArmed: vehicle ? vehicle.armed : false
+                    color: armBtnMa.containsMouse
+                        ? (isArmed ? "#c93030" : "#3eaedb")
+                        : (isArmed ? "#a82424" : "#61d3ff")
+                    antialiasing: true
 
                     Text {
-                        anchors.horizontalCenter: parent.horizontalCenter
-                        text: joystickVisible ? "ON" : "OFF"
-                        color: joystickVisible ? "#61d3ff" : "#8faabc"
-                        font.pixelSize: 11
+                        anchors.centerIn: parent
+                        text: parent.isArmed ? "DISARM" : "ARM"
+                        color: parent.isArmed ? "#ffffff" : "#0d1620"
+                        font.pixelSize: 12
                         font.weight: Font.DemiBold
                         font.letterSpacing: 1.0
                     }
+
+                    MouseArea {
+                        id: armBtnMa
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: if (commander) commander.setArm(!parent.isArmed)
+                    }
                 }
 
-                MouseArea {
-                    id: jsToggleMa
-                    anchors.fill: parent
-                    hoverEnabled: true
-                    onClicked: joystickVisible = !joystickVisible
+                // 모드 버튼 빌더 — 동일 스타일 반복 회피
+                Component {
+                    id: modeBtnComponent
+                    Rectangle {
+                        property string modeName: ""
+                        property string label: ""
+                        property bool active: vehicle && vehicle.flightMode === modeName
+
+                        width: controlPanel.width; height: 32
+                        radius: 8
+                        color: ma.containsMouse
+                            ? (active ? "#3eaedb" : "#243341")
+                            : (active ? "#61d3ff" : "#0d1620")
+                        border.color: active ? "transparent" : "#2a3540"
+                        border.width: 1
+                        antialiasing: true
+
+                        Text {
+                            anchors.centerIn: parent
+                            text: parent.label
+                            color: parent.active ? "#0d1620" : "#cccccc"
+                            font.pixelSize: 11
+                            font.weight: Font.DemiBold
+                            font.letterSpacing: 0.8
+                        }
+                        MouseArea {
+                            id: ma
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: if (commander) commander.setMode(parent.modeName)
+                        }
+                    }
                 }
+
+                Loader { sourceComponent: modeBtnComponent;
+                         onLoaded: { item.modeName = "MANUAL";    item.label = "MANUAL"; } }
+                Loader { sourceComponent: modeBtnComponent;
+                         onLoaded: { item.modeName = "STABILIZE"; item.label = "STABILIZE"; } }
+                Loader { sourceComponent: modeBtnComponent;
+                         onLoaded: { item.modeName = "ALT_HOLD";  item.label = "ALT HOLD"; } }
             }
         }
     }
