@@ -9,8 +9,8 @@ Rectangle {
     anchors.fill: parent
     color: "#0d1620"
 
-    // false = OSM dark, true = Voyager light
-    property bool useLightMap: false
+    // 맵 모드: "osm" / "voyager" / "3d"
+    property string mapMode: "osm"
 
     // 두 맵이 공유하는 center/zoom (토글 시 위치/줌 유지)
     property var mapCenter: QtPositioning.coordinate(35.074857, 129.084836)
@@ -20,7 +20,28 @@ Rectangle {
     Loader {
         id: mapLoader
         anchors.fill: parent
-        sourceComponent: useLightMap ? voyagerComponent : osmComponent
+        sourceComponent: {
+            if (mapMode === "voyager") return voyagerComponent
+            if (mapMode === "3d")      return terrain3dComponent
+            return osmComponent
+        }
+    }
+
+    // 3D 모드 placeholder (실제 Qt3D 위젯은 추후 연동)
+    Component {
+        id: terrain3dComponent
+        Rectangle {
+            color: "#0a1018"
+            Text {
+                anchors.centerIn: parent
+                text: "3D TERRAIN\n(coming soon)"
+                color: "#5a6770"
+                font.pixelSize: 18
+                font.weight: Font.DemiBold
+                font.letterSpacing: 1.5
+                horizontalAlignment: Text.AlignHCenter
+            }
+        }
     }
 
     Component {
@@ -255,37 +276,75 @@ Rectangle {
                     model: vehiclesModel
                     Rectangle {
                         width: sysIdPopup.width
-                        height: 36
+                        height: 40
                         color: ma.containsMouse ? "#B3243341" : "transparent"
 
-                        Row {
-                            anchors.fill: parent
+                        // 좌측: sysid 텍스트 (활성 선택 영역)
+                        Item {
+                            id: vehicleSelArea
+                            anchors.left: parent.left
+                            anchors.top: parent.top
+                            anchors.bottom: parent.bottom
+                            anchors.right: connBtn.left
                             anchors.leftMargin: 14
-                            anchors.rightMargin: 14
-                            spacing: 8
-                            Text {
-                                anchors.verticalCenter: parent.verticalCenter
-                                text: index === activeVehicleIndex ? "✓" : "  "
-                                color: "#44bb44"
-                                font.pixelSize: 12
-                                width: 12
+                            anchors.rightMargin: 6
+
+                            Row {
+                                anchors.fill: parent
+                                spacing: 6
+                                Text {
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    text: index === activeVehicleIndex ? "✓" : "  "
+                                    color: "#44bb44"
+                                    font.pixelSize: 12
+                                    width: 12
+                                }
+                                Text {
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    text: "sysid: " + sysid
+                                    color: "#cccccc"
+                                    font.pixelSize: 12
+                                    font.family: "monospace"
+                                }
                             }
-                            Text {
-                                anchors.verticalCenter: parent.verticalCenter
-                                text: "sysid: " + sysid + (name ? "  (" + name + ")" : "")
-                                color: "#cccccc"
-                                font.pixelSize: 12
-                                font.family: "monospace"
+
+                            MouseArea {
+                                id: ma
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                onClicked: activeVehicleIndex = index
                             }
                         }
 
-                        MouseArea {
-                            id: ma
-                            anchors.fill: parent
-                            hoverEnabled: true
-                            onClicked: {
-                                activeVehicleIndex = index
-                                sysIdPopup.close()
+                        // 우측: Connect / Disconnect 버튼
+                        Rectangle {
+                            id: connBtn
+                            anchors.right: parent.right
+                            anchors.verticalCenter: parent.verticalCenter
+                            anchors.rightMargin: 10
+                            width: 84; height: 24
+                            radius: 8
+                            color: connBtnMa.containsMouse
+                                   ? (connected ? "#c93030" : "#3eaedb")
+                                   : (connected ? "#a82424" : "#61d3ff")
+                            antialiasing: true
+
+                            Text {
+                                anchors.centerIn: parent
+                                text: connected ? "Disconnect" : "Connect"
+                                color: connected ? "#ffffff" : "#0d1620"
+                                font.pixelSize: 11
+                                font.weight: Font.DemiBold
+                            }
+
+                            MouseArea {
+                                id: connBtnMa
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                onClicked: {
+                                    // 목데이터: 연결 상태 토글
+                                    vehiclesModel.setProperty(index, "connected", !connected)
+                                }
                             }
                         }
                     }
@@ -449,7 +508,7 @@ Rectangle {
                 Rectangle {
                     width: 90; height: 30; radius: 8
                     color: connectMa.containsMouse ? "#3eaedb" : "#61d3ff"
-                    Text { anchors.centerIn: parent; text: "Connect"; color: "#0d1620"; font.pixelSize: 12; font.weight: Font.DemiBold }
+                    Text { anchors.centerIn: parent; text: "Add"; color: "#0d1620"; font.pixelSize: 12; font.weight: Font.DemiBold }
                     MouseArea {
                         id: connectMa
                         anchors.fill: parent
@@ -462,7 +521,8 @@ Rectangle {
                                 name: "",
                                 host: hostField.text,
                                 port: portField.text,
-                                type: addVehicleDialog.connType
+                                type: addVehicleDialog.connType,
+                                connected: false
                             })
                             activeVehicleIndex = vehiclesModel.count - 1
                             addVehicleDialog.close()
@@ -644,7 +704,93 @@ Rectangle {
             id: mapToggleMa
             anchors.fill: parent
             hoverEnabled: true
-            onClicked: useLightMap = !useLightMap
+            onClicked: mapModePopup.opened ? mapModePopup.close() : mapModePopup.open()
+        }
+
+        // 맵 모드 선택 팝업 (OSM / Voyager / 3D)
+        Popup {
+            id: mapModePopup
+            x: -width + mapToggleBtn.width
+            y: mapToggleBtn.height + 6
+            width: 140
+            padding: 0
+            modal: false
+            focus: true
+            closePolicy: Popup.CloseOnEscape
+
+            background: Rectangle {
+                color: "#B31a2530"
+                border.color: "#2a3540"
+                border.width: 1
+                radius: 12
+            }
+
+            contentItem: Item {
+                layer.enabled: true
+                layer.effect: OpacityMask {
+                    maskSource: Rectangle {
+                        width: mapModePopup.width
+                        height: mapModePopup.height
+                        radius: 12
+                    }
+                }
+
+                Column {
+                    anchors.fill: parent
+                    spacing: 0
+
+                    Text {
+                        padding: 12
+                        text: "MODE"
+                        color: "#8faabc"
+                        font.pixelSize: 10
+                        font.letterSpacing: 1.2
+                    }
+
+                    Repeater {
+                        model: [
+                            { key: "osm",     label: "Dark"   },
+                            { key: "voyager", label: "Bright" },
+                            { key: "3d",      label: "3D"     }
+                        ]
+                        delegate: Rectangle {
+                            width: mapModePopup.width
+                            height: 36
+                            color: modeMa.containsMouse ? "#B3243341" : "transparent"
+
+                            Row {
+                                anchors.fill: parent
+                                anchors.leftMargin: 12
+                                anchors.rightMargin: 12
+                                spacing: 6
+                                Text {
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    text: mapMode === modelData.key ? "✓" : "  "
+                                    color: "#44bb44"
+                                    font.pixelSize: 12
+                                    width: 12
+                                }
+                                Text {
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    text: modelData.label
+                                    color: "#cccccc"
+                                    font.pixelSize: 12
+                                }
+                            }
+
+                            MouseArea {
+                                id: modeMa
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                onClicked: {
+                                    mapMode = modelData.key
+                                    mapModePopup.close()
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -655,9 +801,9 @@ Rectangle {
     // 입력 : 직접 값 입력 (0.1 단위)
     Column {
         id: zoomControl
-        anchors.top: mapToggleBtn.bottom
+        anchors.bottom: depthGauge.top
         anchors.right: parent.right
-        anchors.topMargin: 40
+        anchors.bottomMargin: 22
         anchors.rightMargin: 16
         spacing: 4
 
@@ -898,7 +1044,7 @@ Rectangle {
         anchors.bottom: bottomBar.top
         anchors.right: parent.right
         anchors.bottomMargin: 12
-        anchors.rightMargin: 20
+        anchors.rightMargin: 16
         width: 170; height: 170
         rollDeg: 0
         pitchDeg: 0
@@ -910,7 +1056,7 @@ Rectangle {
         anchors.bottom: attitudeGauge.top
         anchors.right: parent.right
         anchors.bottomMargin: 12
-        anchors.rightMargin: 12
+        anchors.rightMargin: 2
         width: 100; height: 160
         depth: 5.4
         maxDepth: 100
