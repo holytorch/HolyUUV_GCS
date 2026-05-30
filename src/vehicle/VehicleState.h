@@ -8,7 +8,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // VehicleState
 // MAVLink 메시지에서 파싱된 모든 차량 텔레메트리를 저장하고 변경 알림을 발신한다.
-// MavlinkManager가 update*() 슬롯을 호출하고, MainWindow/HudWidget이 신호를 받아 UI를 갱신한다.
+// MavlinkManager가 update*() 슬롯을 호출하고, MainWindow(QML)이 신호를 받아 UI를 갱신한다.
 //
 // 데이터 그룹:
 //   배터리   — SYS_STATUS 메시지

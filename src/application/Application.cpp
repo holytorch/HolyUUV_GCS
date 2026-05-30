@@ -1,6 +1,5 @@
 #include "Application.h"
 #include "comm/UdpLink.h"
-#include "ui/joystick/JoystickWidget.h"
 #include "ui/VehicleCommander.h"
 #include "ui/ConnectionBridge.h"
 #include <QApplication>
@@ -16,12 +15,12 @@ Application::Application(QObject* parent) : QObject(parent) {}
 // 모든 하위 시스템을 연결하고 애플리케이션을 시작한다.
 //
 // 수신 데이터 흐름:
-//   ArduSub → UdpLink → MavlinkManager → VehicleState → HudWidget → 화면
-//   (패킷)    (바이트)   (파싱/분류)      (상태저장)     (렌더링)
+//   ArduSub → UdpLink → MavlinkManager → VehicleState → QML
+//   (패킷)    (바이트)   (파싱/분류)      (상태저장)
 //
 // 송신 데이터 흐름:
-//   조이스틱 → JoystickWidget → MavlinkManager → UdpLink → ArduSub
-//   (입력)     (시그널 발신)    (패킷 조립)      (송신)
+//   QML → VehicleCommander → MavlinkManager → UdpLink → ArduSub
+//   (입력)  (시그널 발신)     (패킷 조립)      (송신)
 //
 // 초기화 순서:
 //   1. TileServer 시작 (127.0.0.1:17777 리슨)
@@ -43,8 +42,6 @@ bool Application::initialize()
     });
     connect(&_linkManager, &LinkManager::bytesReceived,
             &_mavlinkManager, &MavlinkManager::parseBytes);
-
-    
 
     // MavlinkManager → VehicleState 업데이트 파이프라인
     connect(&_mavlinkManager, &MavlinkManager::sysStatusReceived,
@@ -97,33 +94,15 @@ bool Application::initialize()
             conn->addDetectedSysid(sysid);
     });
 
+    // 모든 sysid의 SYS_STATUS → ConnectionBridge 슬롯 (VEHICLES 카드 표시용)
+    if (auto* conn = _mainWindow.connection()) {
+        connect(&_mavlinkManager, &MavlinkManager::anyVehicleSysStatus,
+                conn, &ConnectionBridge::onAnyVehicleSysStatus);
+    }
 
-
-    // JoystickWidget → MavlinkManager → LinkManager 송신 파이프라인
-    connect(_mainWindow.joystickWidget(), &JoystickWidget::joystickState,
-            &_mavlinkManager, &MavlinkManager::sendManualControl);
+    // MAVLink 송신 → LinkManager
     connect(&_mavlinkManager, &MavlinkManager::bytesToSend,
             [this](const QByteArray& data) { _linkManager.sendBytes(data); });
-    connect(_mainWindow.joystickWidget(), &JoystickWidget::armRequested,
-            &_mavlinkManager, &MavlinkManager::sendArmDisarm);
-    connect(_mainWindow.joystickWidget(), &JoystickWidget::connectRequested,
-            [this](const QString& host, quint16 port) {
-        UdpConfig cfg;
-        cfg.remoteHost = host;
-        cfg.remotePort = port;
-        cfg.localPort  = 0;   // OS가 빈 포트 자동 할당 (SITL 포트 충돌 방지)
-        _linkManager.setLink(std::make_unique<UdpLink>(cfg));
-    });
-    connect(_mainWindow.joystickWidget(), &JoystickWidget::disconnectRequested,
-            [this]() { _linkManager.removeLink(); });
-
-
-    
-    // LinkManager → JoystickWidget 연결 상태 표시
-    connect(&_linkManager, &LinkManager::linkConnected,
-            _mainWindow.joystickWidget(), &JoystickWidget::onLinkConnected);
-    connect(&_linkManager, &LinkManager::linkDisconnected,
-            _mainWindow.joystickWidget(), &JoystickWidget::onLinkDisconnected);
 
     // GCS HEARTBEAT 타이머 + 차량 watchdog 제어
     connect(&_linkManager, &LinkManager::linkConnected,
@@ -134,7 +113,7 @@ bool Application::initialize()
     connect(&_mavlinkManager, &MavlinkManager::vehicleTimedOut,
             [this]() { _linkManager.removeLink(); });
 
-    // QML 컨트롤센터 버튼/조이스틱 → MAVLink 송신 (JoystickWidget과 동일 슬롯 공유)
+    // QML 컨트롤센터 버튼/조이스틱 → MAVLink 송신
     if (auto* cmd = _mainWindow.commander()) {
         connect(cmd, &VehicleCommander::armRequested,
                 &_mavlinkManager, &MavlinkManager::sendArmDisarm);
@@ -176,12 +155,8 @@ bool Application::initialize()
                 &_mavlinkManager, &MavlinkManager::setActiveSysid);
     }
 
-
-
-
     _mainWindow.show();
 
-    
     return true;
 }
 

@@ -66,24 +66,22 @@ void MavlinkManager::parseBytes(const QByteArray& data)
                     const bool isAutopilot  = (hb.autopilot != MAV_AUTOPILOT_INVALID);
 
                     // 중계기(autopilot=INVALID) HEARTBEAT는 차량 감지에서 제외.
-                    // 새 autopilot sysid면 감지 목록에 추가 + UI에 알림.
-                    if (isAutopilot && !_detectedSysids.contains(fromSysid)) {
-                        _detectedSysids.insert(fromSysid);
-                        LOG_INFO("Detected vehicle: sysid=%d compid=%d type=%d base=0x%02X custom=%u",
-                                 fromSysid, _message.compid,
-                                 hb.type, hb.base_mode, hb.custom_mode);
-                        emit sysidDetected(static_cast<int>(fromSysid));
-
-                        // 첫 차량이면 자동 활성화 (이후 새 sysid 발견해도 active는 유지)
-                        if (_activeSysid == 0) {
-                            _activeSysid  = fromSysid;
-                            _targetCompid = _message.compid;
-                            emit activeSysidChanged(static_cast<int>(fromSysid));
+                    // 자동 latch는 하지 않음 — 사용자가 VEHICLES 카드 클릭 시 setActiveSysid로 활성.
+                    if (isAutopilot) {
+                        _sysidCompid[fromSysid] = _message.compid;
+                        if (!_detectedSysids.contains(fromSysid)) {
+                            _detectedSysids.insert(fromSysid);
+                            LOG_INFO("Detected vehicle: sysid=%d compid=%d type=%d base=0x%02X custom=%u",
+                                     fromSysid, _message.compid,
+                                     hb.type, hb.base_mode, hb.custom_mode);
+                            emit sysidDetected(static_cast<int>(fromSysid));
                         }
                     }
 
-                    // 활성 차량 HEARTBEAT 수신 → watchdog 리셋
-                    if (fromSysid == _activeSysid && _vehicleWatchdog->isActive())
+                    // 어떤 autopilot HEARTBEAT라도 수신되면 watchdog 리셋 (활성 sysid 무관).
+                    // 자동 latch 제거 후 사용자가 카드 클릭 전에는 _activeSysid=0이라
+                    // 활성 필터를 걸면 watchdog가 5초 후 만료되어 링크가 자동 해제됨.
+                    if (isAutopilot && _vehicleWatchdog->isActive())
                         _vehicleWatchdog->start();
 
                     // 활성 차량의 HEARTBEAT만 VehicleState로 전달.
@@ -115,16 +113,25 @@ void MavlinkManager::parseBytes(const QByteArray& data)
                 }
 
                 case MAVLINK_MSG_ID_SYS_STATUS: {
-                    if (_message.sysid != _activeSysid) break;
                     mavlink_sys_status_t sys;
                     mavlink_msg_sys_status_decode(&_message, &sys);
-                    MavlinkSysStatus out;
-                    out.voltageBattery   = sys.voltage_battery;
-                    out.currentBattery   = sys.current_battery;
-                    out.batteryRemaining = sys.battery_remaining;
-                    out.dropRateComm     = sys.drop_rate_comm;  // SITL: 항상 0
-                    out.errorsComm       = sys.errors_comm;
-                    emit sysStatusReceived(out);
+
+                    // 모든 sysid → 카드 슬롯 (활성 필터 없음)
+                    emit anyVehicleSysStatus(
+                        static_cast<int>(_message.sysid),
+                        static_cast<int>(static_cast<int8_t>(sys.battery_remaining)),
+                        sys.voltage_battery / 1000.0f);
+
+                    // 활성 차량만 VehicleState로 (컨트롤 센터 표시용)
+                    if (_message.sysid == _activeSysid) {
+                        MavlinkSysStatus out;
+                        out.voltageBattery   = sys.voltage_battery;
+                        out.currentBattery   = sys.current_battery;
+                        out.batteryRemaining = sys.battery_remaining;
+                        out.dropRateComm     = sys.drop_rate_comm;  // SITL: 항상 0
+                        out.errorsComm       = sys.errors_comm;
+                        emit sysStatusReceived(out);
+                    }
                     break;
                 }
 
@@ -314,6 +321,7 @@ void MavlinkManager::stopHeartbeat()
 void MavlinkManager::resetVehicleLatch()
 {
     _detectedSysids.clear();
+    _sysidCompid.clear();
     if (_activeSysid != 0) {
         _activeSysid = 0;
         emit activeSysidChanged(0);
@@ -332,7 +340,9 @@ void MavlinkManager::setActiveSysid(int sysid)
     const uint8_t s = static_cast<uint8_t>(sysid);
     if (s == _activeSysid) return;
     _activeSysid = s;
-    LOG_INFO("Active sysid switched to %d", _activeSysid);
+    if (s != 0)
+        _targetCompid = _sysidCompid.value(s, 1);   // 알려진 compid 또는 ArduSub 기본 1
+    LOG_INFO("Active sysid switched to %d (compid=%d)", _activeSysid, _targetCompid);
     emit activeSysidChanged(sysid);
 }
 

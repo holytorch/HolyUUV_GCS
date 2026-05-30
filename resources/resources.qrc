@@ -9,5 +9,7 @@
         <file alias="assets/satellite.png">../assets/satellite.png</file>
         <file alias="assets/map.png">../assets/map.png</file>
         <file alias="assets/UUV.png">../assets/UUV.png</file>
+        <file alias="assets/AUV.png">../assets/AUV.png</file>
+        <file alias="assets/velocity.png">../assets/velocity.png</file>
     </qresource>
 </RCC>

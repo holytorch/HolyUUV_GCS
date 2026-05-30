@@ -8,8 +8,7 @@
 // VehicleCommander
 // QML → MAVLink 송신 브리지. QML(또는 다른 C++ 코드)이 Q_INVOKABLE 메서드로
 // arm/disarm/setMode를 요청하면, 시그널로 전파한다.
-// Application이 이 시그널을 MavlinkManager의 send* 슬롯에 연결한다
-// (JoystickWidget signals와 같은 패턴).
+// Application이 이 시그널을 MavlinkManager의 send* 슬롯에 연결한다.
 //
 // 송신만 책임. 현재 상태(armed 여부, 현재 mode)는 VehicleState를 보면 됨.
 // ─────────────────────────────────────────────────────────────────────────────

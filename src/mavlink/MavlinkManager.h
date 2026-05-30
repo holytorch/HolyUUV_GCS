@@ -3,6 +3,7 @@
 #include <QObject>
 #include <QByteArray>
 #include <QSet>
+#include <QMap>
 #include <QTimer>
 #include <cstdint>
 
@@ -109,6 +110,8 @@ signals:
     void activeSysidChanged(int sysid);
     // 차량 HEARTBEAT가 5초 이상 수신되지 않으면 발신 → 자동 disconnect.
     void vehicleTimedOut();
+    // 모든 sysid의 SYS_STATUS — 카드 슬롯 갱신용 (활성 필터 없음).
+    void anyVehicleSysStatus(int sysid, int batteryRemaining, float voltage);
 
 private:
 #ifdef MAVLINK_AVAILABLE
@@ -124,6 +127,8 @@ private:
 
     // 감지된 모든 sysid (HEARTBEAT 송신 차량). 한 연결에 여러 sysid가 섞일 수 있음.
     QSet<uint8_t> _detectedSysids;
+    // sysid → compid 매핑 (HEARTBEAT 수신 시 갱신). setActiveSysid에서 target compid 결정에 사용.
+    QMap<uint8_t, uint8_t> _sysidCompid;
 
     // 활성 차량 sysid — 0이면 미정. 첫 HEARTBEAT에서 자동 latch되거나,
     // 사용자가 setActiveSysid로 변경. 모든 송신의 target.

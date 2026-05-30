@@ -3,6 +3,8 @@
 #include <QObject>
 #include <QString>
 #include <QVariantList>
+#include <QVariantMap>
+#include <QMap>
 #include <cstdint>
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -23,6 +25,9 @@ class ConnectionBridge : public QObject {
     Q_PROPERTY(int          currentPort     READ currentPort     NOTIFY currentEndpointChanged)
     Q_PROPERTY(QVariantList  detectedSysids READ detectedSysids  NOTIFY detectedSysidsChanged)
     Q_PROPERTY(int          activeSysid     READ activeSysid     NOTIFY activeSysidChanged)
+    // sysid별 텔레메트리 슬롯 (카드 표시용) — 활성 차량 무관, 모든 감지된 차량의 정보
+    // 각 항목: { sysid, batteryRemaining, voltage, signalLevel }
+    Q_PROPERTY(QVariantList  vehiclesInfo   READ vehiclesInfo    NOTIFY vehiclesInfoChanged)
 public:
     explicit ConnectionBridge(QObject* parent = nullptr) : QObject(parent) {}
 
@@ -31,6 +36,7 @@ public:
     int          currentPort()     const { return _port; }
     QVariantList detectedSysids()  const { return _detectedSysids; }
     int          activeSysid()     const { return _activeSysid; }
+    QVariantList vehiclesInfo()    const;
 
     Q_INVOKABLE void connectUdp(const QString& host, int port);
     Q_INVOKABLE void disconnectLink();
@@ -43,20 +49,32 @@ public:
     void clearDetectedSysids();
     void setActiveSysidMirror(int sysid);   // emit만 (실제 변경은 MavlinkManager가)
 
+public slots:
+    // 모든 sysid의 SYS_STATUS 업데이트 (MavlinkManager가 호출). 슬롯 갱신 후 vehiclesInfoChanged emit.
+    void onAnyVehicleSysStatus(int sysid, int batteryRemaining, float voltage);
+
 signals:
     void connectedChanged();
     void currentEndpointChanged();
     void detectedSysidsChanged();
     void activeSysidChanged();
+    void vehiclesInfoChanged();
 
     void connectRequested(const QString& host, quint16 port);
     void disconnectRequested();
     void activeSysidChangeRequested(int sysid);
 
 private:
+    struct VehicleSlot {
+        int   batteryRemaining = -1;
+        float voltage          = 0.0f;
+        int   signalLevel      = 0;   // 0=no signal, 3=full
+    };
+
     bool         _connected = false;
     QString      _host;
     int          _port = 0;
     QVariantList _detectedSysids;
     int          _activeSysid = 0;
+    QMap<int, VehicleSlot> _slots;
 };

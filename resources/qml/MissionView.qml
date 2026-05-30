@@ -344,11 +344,50 @@ Rectangle {
             id: sysIdPopup
             x: 0
             y: sysIdCard.height + 6
-            width: 260
+            // ── 동적 폭 ─────────────────────────────────────────────
+            //   1) 비히클 카드: cardWidth 고정, 한 줄 최대 5개. 감지된 수만큼 grid 폭 결정.
+            //   2) 연결 행: "type host:port" 텍스트 + Connect 버튼 폭 + 마진.
+            //   둘 중 큰 값 + minBaseWidth 와 비교해 popup width 결정.
+            property int minBaseWidth:   240                 // Add Connection 등 최소 폭
+            property int cardWidth:      90
+            property int gridSidePad:    24                  // grid 좌우 padding (x:12 양쪽)
+            property int gridCellGap:    8
+            property int vehiclesCount:  connection ? connection.detectedSysids.length : 0
+            property int gridColumns:    Math.min(Math.max(vehiclesCount, 1), 5)
+            property int vehiclesWidth:  gridSidePad + gridColumns * cardWidth
+                                          + (gridColumns - 1) * gridCellGap
+            property int connRowExtra:   14 + 12 + 84 + 10 + 6   // leftMargin + gap + btn + rightMargin + 여유
+            property int maxConnRowWidth: 0
+
+            width: Math.max(minBaseWidth, vehiclesWidth, maxConnRowWidth)
             padding: 0
             modal: false
             focus: true
             closePolicy: Popup.CloseOnEscape
+
+            // 연결 행 텍스트 폭 측정용
+            TextMetrics {
+                id: connTextMetrics
+                font.pixelSize: 12
+                font.family: "monospace"
+            }
+
+            function recalcMaxRowWidth() {
+                var maxW = 0
+                for (var i = 0; i < connectionsModel.count; i++) {
+                    var it = connectionsModel.get(i)
+                    connTextMetrics.text = it.type.toLowerCase() + " " + it.host + ":" + it.port
+                    var w = connTextMetrics.advanceWidth + connRowExtra
+                    if (w > maxW) maxW = w
+                }
+                maxConnRowWidth = maxW
+            }
+
+            Connections {
+                target: connectionsModel
+                function onCountChanged() { sysIdPopup.recalcMaxRowWidth() }
+            }
+            Component.onCompleted: recalcMaxRowWidth()
 
             background: Rectangle {
                 color: "#B31a2530"
@@ -372,6 +411,7 @@ Rectangle {
                     anchors.fill: parent
                     spacing: 0
 
+                // ── CONNECTIONS 섹션 ──────────────────────────────
                 Text {
                     padding: 14
                     text: "CONNECTIONS"
@@ -380,120 +420,67 @@ Rectangle {
                     font.letterSpacing: 1.2
                 }
 
-                // 연결 리스트 — 각 엔트리는 host:port + Connect/Disconnect 버튼,
-                // 활성 연결의 경우 그 아래로 감지된 sysid 서브리스트가 펼쳐진다.
+                // 연결 리스트 — 각 엔트리는 host:port + Connect/Disconnect 버튼
                 Repeater {
                     model: connectionsModel
-                    Column {
+                    Rectangle {
                         width: sysIdPopup.width
+                        height: 40
+                        // 이 엔트리가 현재 활성 연결인지 — host:port 일치 + connected
+                        property bool isActive: connection
+                            && connection.connected
+                            && connection.currentHost === host
+                            && connection.currentPort === port
+                        color: connRowMa.containsMouse ? "#B3243341" : "transparent"
 
-                        // 1) 연결 행 (host:port + 버튼)
+                        Text {
+                            anchors.left: parent.left
+                            anchors.verticalCenter: parent.verticalCenter
+                            anchors.leftMargin: 14
+                            text: type.toLowerCase() + " " + host + ":" + port
+                            color: "#cccccc"
+                            font.pixelSize: 12
+                            font.family: "monospace"
+                        }
+                        // Connect/Disconnect 버튼
                         Rectangle {
-                            width: parent.width
-                            height: 40
-                            // 이 엔트리가 현재 활성 연결인지 — host:port 일치 + connected
-                            property bool isActive: connection
-                                && connection.connected
-                                && connection.currentHost === host
-                                && connection.currentPort === port
-                            color: connRowMa.containsMouse ? "#B3243341" : "transparent"
-
+                            anchors.right: parent.right
+                            anchors.verticalCenter: parent.verticalCenter
+                            anchors.rightMargin: 10
+                            width: 84; height: 24
+                            radius: 8
+                            color: connBtnMa.containsMouse
+                                ? (parent.isActive ? "#c93030" : "#3eaedb")
+                                : (parent.isActive ? "#a82424" : "#61d3ff")
+                            antialiasing: true
                             Text {
-                                anchors.left: parent.left
-                                anchors.verticalCenter: parent.verticalCenter
-                                anchors.leftMargin: 14
-                                text: type.toLowerCase() + " " + host + ":" + port
-                                color: "#cccccc"
-                                font.pixelSize: 12
-                                font.family: "monospace"
-                            }
-                            // Connect/Disconnect 버튼
-                            Rectangle {
-                                anchors.right: parent.right
-                                anchors.verticalCenter: parent.verticalCenter
-                                anchors.rightMargin: 10
-                                width: 84; height: 24
-                                radius: 8
-                                color: connBtnMa.containsMouse
-                                    ? (parent.isActive ? "#c93030" : "#3eaedb")
-                                    : (parent.isActive ? "#a82424" : "#61d3ff")
-                                antialiasing: true
-                                Text {
-                                    anchors.centerIn: parent
-                                    text: parent.parent.isActive ? "Disconnect" : "Connect"
-                                    color: parent.parent.isActive ? "#ffffff" : "#0d1620"
-                                    font.pixelSize: 11
-                                    font.weight: Font.DemiBold
-                                }
-                                MouseArea {
-                                    id: connBtnMa
-                                    anchors.fill: parent
-                                    hoverEnabled: true
-                                    cursorShape: Qt.PointingHandCursor
-                                    onClicked: {
-                                        if (parent.parent.isActive) connection.disconnectLink()
-                                        else connection.connectUdp(host, port)
-                                    }
-                                }
+                                anchors.centerIn: parent
+                                text: parent.parent.isActive ? "Disconnect" : "Connect"
+                                color: parent.parent.isActive ? "#ffffff" : "#0d1620"
+                                font.pixelSize: 11
+                                font.weight: Font.DemiBold
                             }
                             MouseArea {
-                                id: connRowMa
+                                id: connBtnMa
                                 anchors.fill: parent
                                 hoverEnabled: true
-                                acceptedButtons: Qt.NoButton  // 버튼 클릭 우회용
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: {
+                                    if (parent.parent.isActive) connection.disconnectLink()
+                                    else connection.connectUdp(host, port)
+                                }
                             }
                         }
-
-                        // 2) 활성 연결이면 감지된 sysid 서브리스트
-                        Repeater {
-                            // connection 객체에서 detectedSysids를 가져오되, 이 엔트리가
-                            // 활성 연결일 때만. 활성 아니면 빈 배열.
-                            model: (connection && connection.connected
-                                    && connection.currentHost === host
-                                    && connection.currentPort === port)
-                                   ? connection.detectedSysids : []
-                            Rectangle {
-                                width: sysIdPopup.width
-                                height: 28
-                                color: sysMa.containsMouse ? "#B3243341" : "transparent"
-                                Row {
-                                    anchors.fill: parent
-                                    anchors.leftMargin: 36   // 들여쓰기로 트리 표현
-                                    spacing: 6
-                                    Text {
-                                        anchors.verticalCenter: parent.verticalCenter
-                                        text: connection.activeSysid === modelData ? "✓" : "  "
-                                        color: "#44bb44"
-                                        font.pixelSize: 12
-                                        width: 12
-                                    }
-                                    Text {
-                                        anchors.verticalCenter: parent.verticalCenter
-                                        text: "sysid: " + modelData
-                                        color: "#cccccc"
-                                        font.pixelSize: 11
-                                        font.family: "monospace"
-                                    }
-                                }
-                                MouseArea {
-                                    id: sysMa
-                                    anchors.fill: parent
-                                    hoverEnabled: true
-                                    cursorShape: Qt.PointingHandCursor
-                                    onClicked: connection.setActiveSysid(modelData)
-                                }
-                            }
+                        MouseArea {
+                            id: connRowMa
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            acceptedButtons: Qt.NoButton  // 버튼 클릭 우회용
                         }
                     }
                 }
 
-                Rectangle {
-                    width: sysIdPopup.width
-                    height: 1
-                    color: "#2a3540"
-                }
-
-                // + Add Connection
+                // + Add Connection (CONNECTIONS 섹션 끝)
                 Rectangle {
                     width: sysIdPopup.width
                     height: 40
@@ -515,6 +502,188 @@ Rectangle {
                         onClicked: {
                             sysIdPopup.close()
                             addVehicleDialog.open()
+                        }
+                    }
+                }
+
+                Rectangle {
+                    width: sysIdPopup.width
+                    height: 1
+                    color: "#2a3540"
+                }
+
+                // ── VEHICLES 섹션 (mock 데이터 5열 그리드) ──────────
+                Text {
+                    padding: 14
+                    text: "VEHICLES"
+                    color: "#8faabc"
+                    font.pixelSize: 10
+                    font.letterSpacing: 1.2
+                }
+
+                Grid {
+                    x: 12
+                    width: sysIdPopup.width - 24
+                    columns: 5
+                    rowSpacing: 8
+                    columnSpacing: 8
+                    bottomPadding: 12
+
+                    // 감지된 sysid가 없으면 안내 메시지
+                    Text {
+                        visible: !connection || connection.detectedSysids.length === 0
+                        width: sysIdPopup.width - 24
+                        topPadding: 10
+                        bottomPadding: 10
+                        horizontalAlignment: Text.AlignHCenter
+                        text: "no vehicles — connect to a link first"
+                        color: "#5a6a78"
+                        font.pixelSize: 11
+                        font.italic: true
+                    }
+
+                    Repeater {
+                        // ConnectionBridge.vehiclesInfo — 모든 감지된 차량의 실시간 슬롯
+                        model: connection ? connection.vehiclesInfo : []
+
+                        delegate: Rectangle {
+                            // 카드 폭은 고정 — popup width가 카드 수에 맞춰 늘었다 줄었다 함
+                            width: sysIdPopup.cardWidth
+                            height: 170
+                            radius: 8
+
+                            property int  cardSysid:   modelData.sysid
+                            property bool isActive:    connection && connection.activeSysid === cardSysid
+                            property int  cardBattery: modelData.batteryRemaining
+                            property int  cardSignal:  modelData.signalLevel
+
+                            color: cardMa.containsMouse ? "#152332" : "#0d1620"
+                            border.color: isActive ? "#aaff00" : "#2a3540"
+                            border.width: isActive ? 2 : 1
+                            antialiasing: true
+
+                            Column {
+                                anchors.fill: parent
+                                anchors.margins: 6
+                                spacing: 8
+
+                                // AUV 이미지 — 가로 폭에 맞춰 채움
+                                Image {
+                                    width: parent.width
+                                    height: 52
+                                    source: "qrc:/assets/AUV.png"
+                                    fillMode: Image.PreserveAspectFit
+                                    smooth: true
+                                    antialiasing: true
+                                    mipmap: true
+                                    sourceSize.width: 220
+                                    sourceSize.height: 220
+                                }
+
+                                // WiFi 아이콘 (Canvas) — 흰색, 1.5배 키움
+                                Canvas {
+                                    id: wifiCanvas
+                                    width: parent.width
+                                    height: 33
+                                    property int level: cardSignal
+                                    onLevelChanged: requestPaint()
+                                    onPaint: {
+                                        var ctx = getContext("2d")
+                                        ctx.clearRect(0, 0, width, height)
+                                        var cx = width / 2
+                                        var cy = height - 3
+                                        var activeColor   = "#ffffff"
+                                        var inactiveColor = "#3a4a55"
+                                        for (var i = 1; i <= 3; i++) {
+                                            ctx.strokeStyle = i <= level ? activeColor : inactiveColor
+                                            ctx.lineWidth = 3.0
+                                            ctx.beginPath()
+                                            var r = 0.6 + i * 3.9   // 비례 1.5배
+                                            ctx.arc(cx, cy, r, Math.PI * 1.25, Math.PI * 1.75)
+                                            ctx.stroke()
+                                        }
+                                        ctx.fillStyle = level > 0 ? activeColor : inactiveColor
+                                        ctx.beginPath()
+                                        ctx.arc(cx, cy, 1.5, 0, Math.PI * 2)
+                                        ctx.fill()
+                                    }
+                                    Component.onCompleted: requestPaint()
+                                }
+
+                                // 배터리 인디케이터
+                                Row {
+                                    anchors.horizontalCenter: parent.horizontalCenter
+                                    spacing: 5
+
+                                    Item {
+                                        width: 28; height: 12
+                                        anchors.verticalCenter: parent.verticalCenter
+
+                                        Rectangle {
+                                            id: cardBatShell
+                                            anchors.left: parent.left
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            width: 25; height: 12
+                                            radius: 2.5
+                                            color: "#0d1620"
+                                            border.color: "#8faabc"
+                                            border.width: 1
+                                            antialiasing: true
+
+                                            Rectangle {
+                                                anchors.left: parent.left
+                                                anchors.top: parent.top
+                                                anchors.bottom: parent.bottom
+                                                anchors.margins: 1.6
+                                                radius: 1.2
+                                                width: cardBattery < 0
+                                                    ? 0
+                                                    : (cardBatShell.width - 3.2) * cardBattery / 100
+                                                color: {
+                                                    if (cardBattery < 0)  return "#3a4a55"
+                                                    if (cardBattery < 20) return "#ff5252"
+                                                    if (cardBattery < 50) return "#ffb347"
+                                                    return "#aaff00"
+                                                }
+                                                antialiasing: true
+                                            }
+                                        }
+                                        Rectangle {
+                                            anchors.left: cardBatShell.right
+                                            anchors.verticalCenter: parent.verticalCenter
+                                            width: 2.5; height: 5
+                                            radius: 1
+                                            color: "#8faabc"
+                                        }
+                                    }
+
+                                    Text {
+                                        text: cardBattery < 0 ? "—" : (cardBattery + "%")
+                                        color: "#cccccc"
+                                        font.pixelSize: 11
+                                        font.family: "monospace"
+                                        anchors.verticalCenter: parent.verticalCenter
+                                    }
+                                }
+
+                                // sysid 라벨
+                                Text {
+                                    anchors.horizontalCenter: parent.horizontalCenter
+                                    text: "sysid : " + cardSysid
+                                    color: "#cccccc"
+                                    font.pixelSize: 11
+                                    font.family: "monospace"
+                                    font.weight: Font.DemiBold
+                                }
+                            }
+
+                            MouseArea {
+                                id: cardMa
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: if (connection) connection.setActiveSysid(cardSysid)
+                            }
                         }
                     }
                 }
@@ -768,15 +937,16 @@ Rectangle {
 
         Text {
             anchors.centerIn: parent
-            // GPS 좌표. 미수신(0,0) 또는 vehicle 없음이면 "---"로 표기.
+            // GPS 좌표. monospace + 공백 패딩으로 ° N, ° E 위치 고정.
+            // 위도: "XX.XXXXXXX" 10자리, 경도: "XXX.XXXXXXX" 11자리 우측 정렬.
             text: {
                 if (!vehicle) return "—"
+                function pad(s, n) { while (s.length < n) s = " " + s; return s }
                 var lat = vehicle.latitude, lon = vehicle.longitude
-                if (lat === 0 && lon === 0) return "---° N,  ---° E"
-                var latHem = lat >= 0 ? "N" : "S"
-                var lonHem = lon >= 0 ? "E" : "W"
-                return Math.abs(lat).toFixed(7) + "° " + latHem
-                     + ",  " + Math.abs(lon).toFixed(7) + "° " + lonHem
+                if (lat === 0 && lon === 0)
+                    return pad("---", 10) + "° N,  " + pad("---", 11) + "° E"
+                return pad(Math.abs(lat).toFixed(7), 10) + "° " + (lat >= 0 ? "N" : "S")
+                     + ",  " + pad(Math.abs(lon).toFixed(7), 11) + "° " + (lon >= 0 ? "E" : "W")
             }
             color: "#cccccc"
             font.pixelSize: 12
@@ -1365,7 +1535,7 @@ Rectangle {
             Text {
                 anchors.top: parent.top
                 anchors.left: parent.left
-                anchors.topMargin: 10
+                anchors.topMargin: 6
                 anchors.leftMargin: 14
                 text: "CONTROL CENTER"
                 color: "#8faabc"
@@ -1373,9 +1543,20 @@ Rectangle {
                 font.letterSpacing: 1.2
             }
 
+            // 활성 차량 없을 때 안내 (카드를 클릭해야 조종 콘텐츠가 뜸)
+            Text {
+                anchors.centerIn: parent
+                visible: !vehicle || vehicle.sysid === 0
+                text: "Select a vehicle from VEHICLES"
+                color: "#5a6a78"
+                font.pixelSize: 13
+                font.italic: true
+            }
+
             // ── UUV 그림 (컨트롤 센터 전체 높이) ──────────────────
             Image {
                 id: uuvImage
+                visible: vehicle && vehicle.sysid > 0
                 anchors.top: parent.top
                 anchors.bottom: parent.bottom
                 anchors.left: parent.left
@@ -1392,76 +1573,81 @@ Rectangle {
                 fillMode: Image.PreserveAspectFit
             }
 
-            // 한 줄로 정렬: [텔레메트리] [조이스틱 토글]
-            Row {
+            // 텔레메트리 영역 (UUV 그림 ↔ 컨트롤 패널 사이를 차지)
+            Item {
+                visible: vehicle && vehicle.sysid > 0
                 anchors.top: parent.top
                 anchors.bottom: parent.bottom
                 anchors.left: uuvImage.right
-                anchors.right: parent.right
-                anchors.topMargin: 28
-                anchors.bottomMargin: 12
+                anchors.right: controlPanel.left
+                anchors.topMargin: 20
+                anchors.bottomMargin: 20
                 anchors.leftMargin: 14
-                anchors.rightMargin: 14
-                spacing: 14
+                anchors.rightMargin: 12
 
-                // ── 텔레메트리 (배터리 → 속도 → 스로틀 가로 배치) ──
-                Row {
-                    height: parent.height
-                    anchors.verticalCenter: parent.verticalCenter
-                    spacing: 28
+                // ── 텔레메트리 (배터리 → 속도 → 스로틀 세로 배치) — 영역 중앙 정렬 ──
+                Column {
+                    anchors.centerIn: parent
+                    spacing: 6
 
                     // 배터리
                     Row {
-                        height: 40
-                        spacing: 10
-                        Rectangle {
-                            width: 40; height: 40; radius: 14
-                            color: "#0d1620"
+                        height: 36
+                        spacing: 8
+
+                        // 배터리 아이콘 (가로 바 스타일) — 시작점을 다른 Row와 통일 (width 36)
+                        Item {
+                            width: 36; height: 14
                             anchors.verticalCenter: parent.verticalCenter
-                            antialiasing: true
-                            Item {
-                                anchors.centerIn: parent
-                                width: 22; height: 12
+
+                            // 외곽 셸 — Item 중앙에 배치
+                            Rectangle {
+                                id: batShell
+                                anchors.horizontalCenter: parent.horizontalCenter
+                                anchors.horizontalCenterOffset: -2  // 단자 폭만큼 좌측으로
+                                anchors.verticalCenter: parent.verticalCenter
+                                width: 30; height: 13
+                                radius: 3
+                                color: "#0d1620"
+                                border.color: "#8faabc"
+                                border.width: 1.2
+                                antialiasing: true
+
+                                // 채움 바
                                 Rectangle {
-                                    id: batShellInner
                                     anchors.left: parent.left
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    width: 18; height: 12
+                                    anchors.top: parent.top
+                                    anchors.bottom: parent.bottom
+                                    anchors.margins: 2
                                     radius: 2
-                                    color: "transparent"
-                                    border.color: "#eeeeee"
-                                    border.width: 1.2
-                                    antialiasing: true
-                                    Rectangle {
-                                        anchors.left: parent.left
-                                        anchors.top: parent.top
-                                        anchors.bottom: parent.bottom
-                                        anchors.margins: 2
-                                        // 배터리 잔량(%)에 비례한 채움. 미수신(<0)은 0으로 표시.
-                                        width: {
-                                            var pct = (vehicle && vehicle.batteryRemaining >= 0)
-                                                      ? Math.max(0, Math.min(100, vehicle.batteryRemaining)) : 0
-                                            return (parent.width - 4) * pct / 100
-                                        }
-                                        // 30% 이하면 빨갛게
-                                        color: (vehicle && vehicle.batteryRemaining >= 0 && vehicle.batteryRemaining < 30)
-                                               ? "#ff6464" : "#eeeeee"
-                                        radius: 1
+                                    width: {
+                                        var pct = (vehicle && vehicle.batteryRemaining >= 0)
+                                                  ? Math.max(0, Math.min(100, vehicle.batteryRemaining)) : 0
+                                        return (batShell.width - 4) * pct / 100
                                     }
-                                }
-                                Rectangle {
-                                    anchors.left: batShellInner.right
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    width: 2; height: 5
-                                    color: "#eeeeee"
-                                    radius: 1
+                                    color: {
+                                        if (!vehicle || vehicle.batteryRemaining < 0) return "#3a4a55"
+                                        if (vehicle.batteryRemaining < 20) return "#ff5252"
+                                        if (vehicle.batteryRemaining < 50) return "#ffb347"
+                                        return "#aaff00"
+                                    }
+                                    antialiasing: true
                                 }
                             }
+                            // 양극 단자 (오른쪽 돌출)
+                            Rectangle {
+                                anchors.left: batShell.right
+                                anchors.verticalCenter: parent.verticalCenter
+                                anchors.leftMargin: 0
+                                width: 3; height: 6
+                                radius: 1
+                                color: "#8faabc"
+                            }
                         }
+
                         Text {
-                            // 배터리 잔량(%) + 전압(V). 미수신 시 "—".
                             text: {
-                                if (!vehicle || vehicle.batteryRemaining < 0) return "— %"
+                                if (!vehicle || vehicle.batteryRemaining < 0) return "—%"
                                 return vehicle.batteryRemaining + "%  " + vehicle.voltage.toFixed(1) + "V"
                             }
                             color: "#cccccc"
@@ -1470,36 +1656,20 @@ Rectangle {
                         }
                     }
 
-                    // 속도
+                    // 속도 — velocity.png 아이콘 + 수치
                     Row {
-                        height: 40
-                        spacing: 10
-                        Rectangle {
-                            width: 40; height: 40; radius: 14
-                            color: "#0d1620"
-                            anchors.verticalCenter: parent.verticalCenter
+                        height: 36
+                        spacing: 8
+                        Image {
+                            width: 36; height: 36
+                            source: "qrc:/assets/velocity.png"
+                            sourceSize.width: 144
+                            sourceSize.height: 144
+                            smooth: true
                             antialiasing: true
-                            // 속도계 아이콘 (반원 + 바늘)
-                            Canvas {
-                                anchors.centerIn: parent
-                                width: 26; height: 28
-                                Component.onCompleted: requestPaint()
-                                onPaint: {
-                                    var ctx = getContext("2d")
-                                    ctx.clearRect(0, 0, width, height)
-                                    ctx.strokeStyle = "#eeeeee"
-                                    ctx.lineWidth = 1.5
-                                    var cx = width / 2
-                                    var cy = height - 6
-                                    ctx.beginPath()
-                                    ctx.arc(cx, cy, 10, Math.PI, 0)
-                                    ctx.stroke()
-                                    ctx.beginPath()
-                                    ctx.moveTo(cx, cy)
-                                    ctx.lineTo(cx + 7, cy - 8)
-                                    ctx.stroke()
-                                }
-                            }
+                            mipmap: true
+                            fillMode: Image.PreserveAspectFit
+                            anchors.verticalCenter: parent.verticalCenter
                         }
                         Text {
                             // VFR_HUD.groundspeed는 m/s — km/h로 변환
@@ -1512,46 +1682,47 @@ Rectangle {
                         }
                     }
 
-                    // 스로틀
+                    // 스로틀 — 원형 프로그래스바
                     Row {
-                        height: 40
-                        spacing: 10
-                        Rectangle {
-                            width: 40; height: 40; radius: 14
-                            color: "#0d1620"
+                        height: 36
+                        spacing: 8
+                        Canvas {
+                            id: throttleRing
+                            width: 36; height: 36
                             anchors.verticalCenter: parent.verticalCenter
                             antialiasing: true
-                            // 스로틀 아이콘 (수직 막대 게이지)
-                            Item {
-                                anchors.centerIn: parent
-                                width: 18; height: 22
-
-                                // 외곽 프레임
-                                Rectangle {
-                                    anchors.fill: parent
-                                    color: "transparent"
-                                    border.color: "#eeeeee"
-                                    border.width: 1.2
-                                    radius: 3
-                                    antialiasing: true
-                                }
-                                // 채움 (현재 스로틀에 비례, 0~100%)
-                                Rectangle {
-                                    anchors.left: parent.left
-                                    anchors.right: parent.right
-                                    anchors.bottom: parent.bottom
-                                    anchors.margins: 2
-                                    height: {
-                                        var pct = vehicle ? Math.max(0, Math.min(100, vehicle.throttle)) : 0
-                                        return (parent.height - 4) * pct / 100
-                                    }
-                                    color: "#eeeeee"
-                                    radius: 1
+                            // ArduSub 음수(역방향) throttle을 magnitude로 표시
+                            property real pct: vehicle
+                                ? Math.max(0, Math.min(100, Math.abs(vehicle.throttle))) / 100
+                                : 0
+                            onPctChanged: requestPaint()
+                            Component.onCompleted: requestPaint()
+                            onPaint: {
+                                var ctx = getContext("2d")
+                                ctx.clearRect(0, 0, width, height)
+                                var cx = width / 2
+                                var cy = height / 2
+                                var r  = 14
+                                // 배경 트랙
+                                ctx.strokeStyle = "#2a3540"
+                                ctx.lineWidth = 4
+                                ctx.beginPath()
+                                ctx.arc(cx, cy, r, 0, Math.PI * 2)
+                                ctx.stroke()
+                                // 진행 호 (12시부터 시계방향)
+                                if (pct > 0) {
+                                    ctx.strokeStyle = "#aaff00"
+                                    ctx.lineWidth = 4
+                                    ctx.lineCap = "round"
+                                    ctx.beginPath()
+                                    var start = -Math.PI / 2
+                                    ctx.arc(cx, cy, r, start, start + Math.PI * 2 * pct)
+                                    ctx.stroke()
                                 }
                             }
                         }
                         Text {
-                            text: (vehicle ? vehicle.throttle : 0) + " %"
+                            text: (vehicle ? Math.abs(vehicle.throttle) : 0) + " %"
                             color: "#cccccc"
                             font.pixelSize: 14
                             anchors.verticalCenter: parent.verticalCenter
@@ -1567,6 +1738,7 @@ Rectangle {
             // 현재 모드와 일치하는 버튼은 active 강조색.
             Column {
                 id: controlPanel
+                visible: vehicle && vehicle.sysid > 0
                 anchors.top: parent.top
                 anchors.right: parent.right
                 anchors.bottom: parent.bottom
