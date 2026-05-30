@@ -23,7 +23,7 @@ Item {
             PluginParameter { name: "osm.mapping.cache.disk.cost_strategy"; value: "unitary" }
         }
 
-        center: QtPositioning.coordinate(35.074857, 129.084836)
+        center: QtPositioning.coordinate(37.52951029463262, 126.94149832867085)
         zoomLevel: 6
         minimumZoomLevel: 0
         maximumZoomLevel: 10.9  // ESRI Ocean 데이터 최대 줌레벨

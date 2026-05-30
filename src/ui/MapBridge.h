@@ -65,7 +65,7 @@ private:
     double  _lat = 0.0;
     double  _lon = 0.0;
     bool    _hasPos = false;
-    double  _mapCenterLat = 35.074857;
-    double  _mapCenterLon = 129.084836;
+    double  _mapCenterLat = 37.52951029463262;
+    double  _mapCenterLon = 126.94149832867085;
     QString _mapMode = "osm";
 };

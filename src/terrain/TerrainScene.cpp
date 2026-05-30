@@ -80,9 +80,11 @@ void TerrainScene::attachTo(Qt3DCore::QEntity* parent)
         _buildMesh();
         _updateVehicleMarker();
         _resetCameraToTerrain();
+    } else if (_firstFixReceived && _vehicleLat != 0.0 && _vehicleLon != 0.0) {
+        // 3D 모드 진입 전에 이미 GPS fix 받은 경우 — 로봇 위치로 타일 로드
+        loadTile(_vehicleLat, _vehicleLon, _zoom);
     }
-    // attachTo는 entity 트리 부착만 책임. fetch는 호출자(showEvent/QML)가
-    // TileServer가 listening 시작한 후 명시적으로 loadTile()로 트리거.
+    // 위 두 경우 모두 해당 없으면(no cache, no GPS) fetch는 QML 호출자가 트리거.
 }
 
 
@@ -276,9 +278,9 @@ void TerrainScene::_stitchAndBuild()
         }
     }
 
-    // 분리형 박스 블러 3회로 해안선 계단 완화
+    // 분리형 박스 블러 1회로 해안선 계단 최소화 (최약 후처리)
     constexpr int BLUR_RADIUS = 1;
-    constexpr int BLUR_PASS   = 3;
+    constexpr int BLUR_PASS   = 1;
     std::vector<float> tmp(subW * subH);
     auto& h = _currentTile.heights;
     for (int pass = 0; pass < BLUR_PASS; ++pass) {

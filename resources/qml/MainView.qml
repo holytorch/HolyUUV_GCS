@@ -21,8 +21,52 @@ Rectangle {
     property string mapMode: "osm"
 
     // 두 맵이 공유하는 center/zoom (토글 시 위치/줌 유지)
-    property var mapCenter: QtPositioning.coordinate(35.074857, 129.084836)
+    property var mapCenter: QtPositioning.coordinate(37.52951029463262, 126.94149832867085)
     property real mapZoom: 15
+
+    // MAVLink GPS 첫 수신 시 맵 중앙을 로봇 위치로 부드럽게 이동 (sysid당 1회)
+    property bool _gpsCentered: false
+
+    // ease-out cubic 보간 타이머 — mapCenter 직접 갱신 (16ms ≈ 60fps)
+    Timer {
+        id: gpsPanTimer
+        interval: 16
+        repeat: true
+        property real fromLat: 0; property real fromLon: 0
+        property real toLat:   0; property real toLon:   0
+        property int  elapsed: 0
+        readonly property int duration: 1400
+
+        onTriggered: {
+            elapsed += interval
+            var t = Math.min(elapsed / duration, 1.0)
+            t = 1 - Math.pow(1 - t, 3)   // ease-out cubic
+            mapCenter = QtPositioning.coordinate(
+                fromLat + (toLat - fromLat) * t,
+                fromLon + (toLon - fromLon) * t)
+            if (elapsed >= duration) { stop(); elapsed = 0 }
+        }
+
+        function panTo(lat, lon) {
+            fromLat = mapCenter.latitude;  fromLon = mapCenter.longitude
+            toLat   = lat;                 toLon   = lon
+            elapsed = 0
+            restart()
+        }
+    }
+
+    Connections {
+        target: vehicle
+        function onGpsChanged() {
+            if (_gpsCentered || !vehicle) return
+            var lat = vehicle.latitude, lon = vehicle.longitude
+            if (lat === 0 && lon === 0) return
+            gpsPanTimer.panTo(lat, lon)
+            _gpsCentered = true
+        }
+        // 활성 차량이 바뀌면 latch 해제 → 새 차량 GPS 오면 다시 이동
+        function onSysidChanged() { _gpsCentered = false }
+    }
 
     // ── 모드별 Loader: 한 번 로드되면 unload하지 않고 visible만 토글 ──
     // 모드 전환 시 컴포넌트 destroy/recreate를 피해서:
@@ -117,14 +161,16 @@ Rectangle {
                 }
 
                 Component.onCompleted: {
-                    if (missionTerrainScene) {
-                        missionTerrainScene.setCamera(terrainCam)
-                        // attachTo는 entity 부착만 (캐시 있으면 mesh 즉시 rebuild)
-                        missionTerrainScene.attachTo(scene3dRoot)
-                        // 캐시 없으면 첫 fetch 명시적으로 트리거.
-                        // (TileServer는 이미 listening 시작했음 — 사용자가 3D 모드를 누른 시점이라)
-                        if (!missionTerrainScene.hasTerrainData())
-                            missionTerrainScene.loadTile(35.074857, 129.084836, 17)
+                    if (mainTerrainScene) {
+                        mainTerrainScene.setCamera(terrainCam)
+                        // attachTo: 캐시 있으면 즉시 rebuild, GPS fix 있으면 로봇 위치로 fetch
+                        mainTerrainScene.attachTo(scene3dRoot)
+                        // GPS도 캐시도 없을 때만 기본 좌표로 fetch
+                        if (!mainTerrainScene.hasTerrainData()) {
+                            var lat = (vehicle && vehicle.latitude  !== 0) ? vehicle.latitude  : 37.52951029463262
+                            var lon = (vehicle && vehicle.longitude !== 0) ? vehicle.longitude : 126.94149832867085
+                            mainTerrainScene.loadTile(lat, lon, 16)
+                        }
                     }
                 }
             }
@@ -499,10 +545,7 @@ Rectangle {
                         id: addMa
                         anchors.fill: parent
                         hoverEnabled: true
-                        onClicked: {
-                            sysIdPopup.close()
-                            addVehicleDialog.open()
-                        }
+                        onClicked: addVehicleDialog.open()
                     }
                 }
 
@@ -827,6 +870,7 @@ Rectangle {
                                 type: addVehicleDialog.connType
                             })
                             addVehicleDialog.close()
+                            sysIdPopup.open()   // 다이얼로그 닫힌 후 팝업 바로 복원
                         }
                     }
                 }
@@ -1337,7 +1381,7 @@ Rectangle {
     property real rightX: 0
     property real rightY: 0
 
-    MissionStickPad {
+    MainStickPad {
         id: leftStickPad
         visible: joystickVisible
         anchors.bottom: bottomBar.top
@@ -1396,7 +1440,7 @@ Rectangle {
         maxDepth: 100
     }
 
-    MissionStickPad {
+    MainStickPad {
         id: rightStickPad
         visible: joystickVisible
         anchors.bottom: bottomBar.top

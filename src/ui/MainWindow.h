@@ -12,7 +12,7 @@ class TerrainScene;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // MainWindow
-// MissionView.qml 단독 창 (Operations 탭 제거됨).
+// MainView.qml 단독 창.
 // QML이 맵/3D/로그/컨트롤센터/조이스틱 모든 UI를 자체 렌더링.
 // ─────────────────────────────────────────────────────────────────────────────
 class MainWindow : public QMainWindow {
@@ -26,9 +26,9 @@ public slots:
 private:
     void _setupUi();
 
-    VehicleState*     _state               = nullptr;
+    VehicleState*     _state             = nullptr;
     MapBridge         _mapBridge;
-    TerrainScene*     _missionTerrainScene = nullptr;
+    TerrainScene*     _mainTerrainScene  = nullptr;
     LogFeed*          _logFeed             = nullptr;
     VehicleCommander* _commander           = nullptr;
     ConnectionBridge* _connection          = nullptr;
