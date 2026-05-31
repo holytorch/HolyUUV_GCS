@@ -863,18 +863,63 @@ Rectangle {
                         anchors.fill: parent
                         hoverEnabled: true
                         onClicked: {
-                            // 연결 엔트리 저장만 — 실제 연결은 사용자가 리스트에서 Connect 클릭 시
-                            connectionsModel.append({
-                                host: hostField.text,
-                                port: parseInt(portField.text),
-                                type: addVehicleDialog.connType
-                            })
+                            var h = hostField.text
+                            var p = parseInt(portField.text)
+                            // 중복 체크
+                            for (var i = 0; i < connectionsModel.count; i++) {
+                                var it = connectionsModel.get(i)
+                                if (it.host === h && it.port === p) {
+                                    dupToast.show()
+                                    return
+                                }
+                            }
+                            connectionsModel.append({ host: h, port: p, type: addVehicleDialog.connType })
                             addVehicleDialog.close()
-                            sysIdPopup.open()   // 다이얼로그 닫힌 후 팝업 바로 복원
+                            sysIdPopup.open()
                         }
                     }
                 }
             }
+        }
+    }
+
+    // 중복 연결 토스트
+    Rectangle {
+        id: dupToast
+        anchors.horizontalCenter: parent.horizontalCenter
+        anchors.top: parent.top
+        anchors.topMargin: 230
+        width: dupToastText.implicitWidth + 32
+        height: 36
+        radius: 10
+        color: "#cc2a3540"
+        border.color: "#ff5252"
+        border.width: 1
+        opacity: 0
+        z: 100
+
+        Text {
+            id: dupToastText
+            anchors.centerIn: parent
+            text: "Already exists"
+            color: "#ff5252"
+            font.pixelSize: 12
+            font.weight: Font.DemiBold
+        }
+
+        function show() {
+            opacity = 1
+            hideTimer.restart()
+        }
+
+        Timer {
+            id: hideTimer
+            interval: 2000
+            onTriggered: dupToast.opacity = 0
+        }
+
+        Behavior on opacity {
+            NumberAnimation { duration: 200 }
         }
     }
 
