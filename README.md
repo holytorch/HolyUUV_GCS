@@ -37,7 +37,7 @@ docker run -it --rm \
     ubuntu:24.04 bash
 
 # then, inside the container:
-cd /workspace && ./scripts/install_deps.sh && ./scripts/build_project_linux.sh
+cd /workspace && ./scripts/install_deps.sh && cmake -B build && cmake --build build -j$(nproc)
 ```
 
 > Don't forget `xhost +local:docker` on the host first so the container can open windows.
