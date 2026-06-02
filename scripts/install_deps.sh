@@ -1,6 +1,9 @@
 #!/bin/bash
 set -e
 
+# scripts/ 폴더 안에 있어도 항상 프로젝트 루트에서 실행되도록 이동
+cd "$(dirname "$(readlink -f "$0")")/.." || exit 1
+
 echo "========================================"
 echo "HolyUUV GCS - Dependency Installation"
 echo "========================================"
@@ -47,8 +50,8 @@ echo
 # ── MAVLink 헤더 (써드파티, header-only) ─────
 # apt 패키지 없음 — git clone으로 설치
 echo "[INFO] Installing MAVLink headers..."
-if [ -f "./setup_mavlink.sh" ]; then
-    bash ./setup_mavlink.sh
+if [ -f "scripts/setup_mavlink.sh" ]; then
+    bash scripts/setup_mavlink.sh
 else
     echo "[WARN] setup_mavlink.sh not found — skipping MAVLink setup"
 fi

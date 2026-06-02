@@ -4,5 +4,6 @@ AppDir/
 *.AppImage
 linuxdeploy
 linuxdeploy-plugin-qt
-build_project_linux.sh
+scripts/build_project_linux.sh
 test/
+GIT_WORKFLOW.md

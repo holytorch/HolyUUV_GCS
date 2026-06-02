@@ -1,6 +1,9 @@
 #!/bin/bash
 set -e
 
+# scripts/ 폴더 안에 있어도 항상 프로젝트 루트에서 실행되도록 이동
+cd "$(dirname "$(readlink -f "$0")")/.." || exit 1
+
 echo "========================================"
 echo "HolyUUV GCS - AppImage Packaging"
 echo "========================================"
