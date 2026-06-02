@@ -37,3 +37,13 @@ a high-fidelity underwater robotics simulation environment.
 | Single-vehicle control | ✅ Supported |
 
 Real hardware integration and multi-vehicle support are on the roadmap and will be introduced in future updates.
+
+---
+
+## License
+
+This project is licensed under the **MIT License** — see [LICENSE](LICENSE) for details.
+
+This software uses **Qt 5**, which is licensed under the **GNU LGPL v3**.
+Qt is dynamically linked, and its source is available at [qt.io](https://www.qt.io/).
+**MAVLink** (c_library_v2) is licensed under the MIT License.
