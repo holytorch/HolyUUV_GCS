@@ -29,6 +29,14 @@ int main(int argc, char* argv[])
     // qt 라이브러리 초기화 (이후 QApplication 객체가 생성됨)
     QApplication qtApp(argc, argv);
 
+    // 애플리케이션 이름 명시 지정.
+    // QStandardPaths::CacheLocation 등은 applicationName을 경로에 사용하는데,
+    // 미지정 시 실행 바이너리명을 따른다. AppImage에서는 그 값이 "AppRun.wrapped"가 되어
+    // 캐시가 ~/.cache/AppRun.wrapped/ 로 잡히는 문제가 있어, 어떤 실행 환경에서도
+    // 항상 ~/.cache/HolyUUV_GCS/ 로 고정되도록 여기서 명시한다.
+    // (organizationName은 지정하지 않음 — 지정 시 ~/.cache/<org>/HolyUUV_GCS/ 로 바뀜)
+    QApplication::setApplicationName("HolyUUV_GCS");
+
     // Ctrl+C(SIGINT) / kill(SIGTERM) 수신 시 Qt 이벤트 루프를 정상 종료
     // → app.run() 반환 → app.shutdown() 호출로 X 버튼과 동일한 종료 경로 보장
     signal(SIGINT,  [](int) { QApplication::quit(); });

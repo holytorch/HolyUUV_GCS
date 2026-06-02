@@ -2,4 +2,7 @@ build/
 3rdparty/
 AppDir/
 *.AppImage
-linuxdeployqt
+linuxdeploy
+linuxdeploy-plugin-qt
+build_project_linux.sh
+test/

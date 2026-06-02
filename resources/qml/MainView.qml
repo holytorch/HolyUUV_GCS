@@ -169,7 +169,7 @@ Rectangle {
                         if (!mainTerrainScene.hasTerrainData()) {
                             var lat = (vehicle && vehicle.latitude  !== 0) ? vehicle.latitude  : 37.52951029463262
                             var lon = (vehicle && vehicle.longitude !== 0) ? vehicle.longitude : 126.94149832867085
-                            mainTerrainScene.loadTile(lat, lon, 16)
+                            mainTerrainScene.loadTile(lat, lon, 17)
                         }
                     }
                 }

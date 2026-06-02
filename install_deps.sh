@@ -31,10 +31,12 @@ sudo apt install -y \
     qml-module-qtquick2 \
     qml-module-qtquick-controls2 \
     qml-module-qtquick-layouts \
+    qml-module-qtquick-window2 \
     qml-module-qtlocation \
     qml-module-qtpositioning \
     qml-module-qtgraphicaleffects \
-    qml-module-qt3d
+    qml-module-qt3d \
+    qml-module-qtquick-scene3d
 
 echo
 echo "========================================"

@@ -350,11 +350,30 @@ void TerrainScene::_buildMesh()
     const int   imgX0 = _stitchCX - _subHalfPx;
     const int   imgY0 = _stitchCY - _subHalfPx;
 
-    QByteArray vertexBytes(subW * subH * 8 * sizeof(float), Qt::Uninitialized);
+    // ── 메시 다운샘플 ─────────────────────────────────────────────────────────
+    // 높이맵(subW×subH)은 줌16에서 529×529 ≈ 28만 정점이라 GPU 셰이더 컴파일/래스터화가
+    // 무겁다 (특히 소프트웨어 렌더링 환경에서 첫 프레임 수십 초). 시각화에 그 정도 밀도는
+    // 불필요하므로 출력 그리드를 MAX_GRID 이하로 제한한다 (텍스처는 풀해상도 유지).
+    // 출력 정점 i → 원본 좌표 sc = round(i*(subW-1)/(outW-1)) 로 비례 매핑해 가장자리를 정렬.
+    constexpr int MAX_GRID = 180;
+    const int outW = std::min(subW, MAX_GRID);
+    const int outH = std::min(subH, MAX_GRID);
+    auto srcX = [&](int i) {
+        return (outW <= 1) ? 0 : static_cast<int>(std::lround(
+            static_cast<double>(i) * (subW - 1) / (outW - 1)));
+    };
+    auto srcY = [&](int j) {
+        return (outH <= 1) ? 0 : static_cast<int>(std::lround(
+            static_cast<double>(j) * (subH - 1) / (outH - 1)));
+    };
+
+    QByteArray vertexBytes(outW * outH * 8 * sizeof(float), Qt::Uninitialized);
     float* vp = reinterpret_cast<float*>(vertexBytes.data());
 
-    for (int sr = 0; sr < subH; ++sr) {
-        for (int sc = 0; sc < subW; ++sc) {
+    for (int oj = 0; oj < outH; ++oj) {
+        const int sr = srcY(oj);
+        for (int oi = 0; oi < outW; ++oi) {
+            const int sc = srcX(oi);
             float h = tile.heightAt(sc, sr);
 
             *vp++ = (sc - _subHalfPx) * scale;
@@ -380,14 +399,14 @@ void TerrainScene::_buildMesh()
         }
     }
 
-    const int quadCount = (subW - 1) * (subH - 1);
+    const int quadCount = (outW - 1) * (outH - 1);
     QByteArray indexBytes(quadCount * 6 * sizeof(uint32_t), Qt::Uninitialized);
     uint32_t* ip = reinterpret_cast<uint32_t*>(indexBytes.data());
-    for (int sr = 0; sr < subH - 1; ++sr) {
-        for (int sc = 0; sc < subW - 1; ++sc) {
-            uint32_t tl = static_cast<uint32_t>(sr * subW + sc);
+    for (int oj = 0; oj < outH - 1; ++oj) {
+        for (int oi = 0; oi < outW - 1; ++oi) {
+            uint32_t tl = static_cast<uint32_t>(oj * outW + oi);
             uint32_t tr = tl + 1;
-            uint32_t bl = tl + static_cast<uint32_t>(subW);
+            uint32_t bl = tl + static_cast<uint32_t>(outW);
             uint32_t br = bl + 1;
             *ip++ = tl; *ip++ = bl; *ip++ = tr;
             *ip++ = tr; *ip++ = bl; *ip++ = br;
@@ -407,7 +426,7 @@ void TerrainScene::_buildMesh()
         a->setVertexSize(size);
         a->setByteOffset(offset * sizeof(float));
         a->setByteStride(8 * sizeof(float));
-        a->setCount(static_cast<uint>(subW * subH));
+        a->setCount(static_cast<uint>(outW * outH));
         a->setBuffer(vBuf);
         geometry->addAttribute(a);
     };

@@ -89,7 +89,7 @@ void TerrainWidget::showEvent(QShowEvent* e)
 
     if (!_autoLoadDone) {
         _autoLoadDone = true;
-        _scene->loadTile(37.52951029463262, 126.94149832867085, 16);
+        _scene->loadTile(37.52951029463262, 126.94149832867085, 17);
     }
 }
 

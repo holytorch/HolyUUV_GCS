@@ -48,7 +48,7 @@ public:
     // 외부 부모 Entity에 _rootEntity를 reparent. QML에서 호출하기 위해 Q_INVOKABLE.
     Q_INVOKABLE void attachTo(Qt3DCore::QEntity* parent);
 
-    Q_INVOKABLE void loadTile(double lat, double lon, int zoom = 16);
+    Q_INVOKABLE void loadTile(double lat, double lon, int zoom = 17);
     Q_INVOKABLE void updateVehiclePosition(double lat, double lon);
 
 signals:
@@ -97,7 +97,7 @@ private:
     // 로드 파라미터
     double _lat  = 37.52951029463262;
     double _lon  = 126.94149832867085;
-    int    _zoom = 16;
+    int    _zoom = 17;
 
     // OSM(dark_all) 수신 상태
     int    _osmTX0 = 0, _osmTY0 = 0;
