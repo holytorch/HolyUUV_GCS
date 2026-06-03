@@ -1,0 +1,41 @@
+title: HolyUUV GCS
+description: Ground control station for autonomous underwater vehicles (AUVs).
+
+# --- GitHub Pages (project site) ---
+# Served at https://holytorch.github.io/HolyUUV_GCS/
+url: https://holytorch.github.io
+baseurl: /HolyUUV_GCS
+
+# --- Theme ---
+# just-the-docs via remote theme. Supported on GitHub Pages through jekyll-remote-theme.
+# To pin a version, append a tag, e.g. just-the-docs/just-the-docs@v0.10.0
+remote_theme: just-the-docs/just-the-docs
+
+# --- just-the-docs options ---
+color_scheme: dark          # the app is dark-themed; match it
+search_enabled: true
+heading_anchors: true
+
+# Callouts — used as `{: .note }` / `{: .warning }` before a blockquote
+callouts:
+  note:
+    title: Note
+    color: blue
+  warning:
+    title: Warning
+    color: yellow
+
+# External links shown at the top-right of the header
+aux_links:
+  "GitHub ↗":
+    - https://github.com/holytorch/HolyUUV_GCS
+aux_links_new_tab: true
+
+# Footer
+back_to_top: true
+back_to_top_text: "Back to top"
+
+# --- Plugins (within the GitHub Pages allow-list) ---
+plugins:
+  - jekyll-remote-theme
+  - jekyll-seo-tag

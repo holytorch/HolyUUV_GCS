@@ -6,3 +6,10 @@ linuxdeploy
 linuxdeploy-plugin-qt
 test/
 GIT_WORKFLOW.md
+
+# Jekyll docs — local preview build artifacts only (docs/ content IS committed & served)
+docs/_site/
+docs/.jekyll-cache/
+docs/.sass-cache/
+docs/.bundle/
+docs/Gemfile.lock

@@ -1,0 +1,12 @@
+# For previewing the docs site locally (optional — GitHub Pages builds it for you).
+#
+#   cd docs
+#   bundle install
+#   bundle exec jekyll serve   # → http://127.0.0.1:4000/HolyUUV_GCS/
+#
+# The github-pages gem mirrors GitHub's own build environment, so a local preview
+# matches what gets published.
+source "https://rubygems.org"
+
+gem "github-pages", group: :jekyll_plugins
+gem "jekyll-remote-theme"
