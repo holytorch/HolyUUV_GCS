@@ -1,7 +1,8 @@
 ---
 title: Building
 layout: default
-nav_order: 3
+nav_order: 2
+parent: For Developers (Build from Source)
 ---
 
 # Building from source
@@ -60,4 +61,4 @@ It uses your system GPU when available and falls back to software rendering auto
 
 ---
 
-Next: [Connecting]({% link pages/connecting.md %}).
+Next: [Connecting]({% link pages/simulation.md %}).

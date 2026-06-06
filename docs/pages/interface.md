@@ -27,7 +27,7 @@ From left to right:
 | Element | What it shows / does |
 |---------|----------------------|
 | **Logo** | HolyUUV GCS. |
-| **`sys_id` card** | Active vehicle's system ID. Click to open the **connections + vehicles** popup (see [Connecting]({% link pages/connecting.md %})). |
+| **`sys_id` card** | Active vehicle's system ID. Click to open the **connections + vehicles** popup (see [Connecting]({% link pages/simulation.md %})). |
 | **Link card** | `● LINKED` (green) while the vehicle HEARTBEAT is alive, `● NO LINKED` (red) otherwise. |
 | **ARM card** | `ARMED` / `DISARMED` — the vehicle's current arm state. |
 | **Compass ribbon** | Heading tape (top center): cardinal (N/E/S/W) + heading in degrees, scrolling with the vehicle's heading. |

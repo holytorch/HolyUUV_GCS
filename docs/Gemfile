@@ -1,12 +1,18 @@
-# For previewing the docs site locally (optional — GitHub Pages builds it for you).
+# Local preview only.
+#
+# GitHub Pages ("Deploy from a branch") IGNORES this Gemfile and builds the site
+# with its own environment — so here we just use a modern Jekyll for a smooth local
+# preview of the same source:
 #
 #   cd docs
 #   bundle install
 #   bundle exec jekyll serve   # → http://127.0.0.1:4000/HolyUUV_GCS/
 #
-# The github-pages gem mirrors GitHub's own build environment, so a local preview
-# matches what gets published.
 source "https://rubygems.org"
 
-gem "github-pages", group: :jekyll_plugins
-gem "jekyll-remote-theme"
+gem "jekyll", "~> 4.3"
+gem "jekyll-remote-theme"   # for  remote_theme: just-the-docs/just-the-docs
+gem "jekyll-include-cache"  # required by the just-the-docs theme
+gem "jekyll-seo-tag"
+gem "webrick"               # Ruby 3 dropped webrick from stdlib (needed by `jekyll serve`)
+gem "rexml"                 # Ruby 3 dropped rexml from default gems (needed by kramdown)

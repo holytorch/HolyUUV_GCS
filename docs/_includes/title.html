@@ -1,0 +1,9 @@
+{%- comment -%}
+  Override of just-the-docs' _includes/title.html.
+  Default behaviour replaces the title text with the logo; here we keep the
+  title text and place the logo to its LEFT instead.
+{%- endcomment -%}
+<span class="site-title-flex">
+  <img class="site-logo-img" src="{{ '/assets/images/logo.png' | relative_url }}" alt="" />
+  <span class="site-title-text">{{ site.title }}</span>
+</span>

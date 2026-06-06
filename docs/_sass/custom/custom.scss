@@ -1,0 +1,39 @@
+// just-the-docs custom overrides (auto-imported by the theme).
+
+// 좌상단 사이트 제목: 로고를 이름 "왼쪽"에 정렬해서 함께 표시
+.site-title-flex {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.site-logo-img {
+  height: 1.5rem;
+  width: auto;
+  flex-shrink: 0;
+  border-radius: 6px;
+}
+
+// 로고 옆 사이트 이름: 현재 크기의 80%로 축소
+.site-title-text {
+  font-size: 80%;
+}
+
+// "Back to top" → 버튼 스타일
+.back-to-top {
+  display: inline-block;
+  margin-top: 1rem;
+  padding: 0.35em 1em;
+  border: 1px solid var(--link-color, #0077b6);
+  border-radius: 6px;
+  font-size: 0.8rem;
+  color: var(--link-color, #0077b6);
+  text-decoration: none;
+  transition: background-color 0.15s, color 0.15s;
+
+  &:hover {
+    background-color: var(--link-color, #0077b6);
+    color: #fff;
+    text-decoration: none;
+  }
+}

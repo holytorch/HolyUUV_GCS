@@ -1,7 +1,8 @@
 ---
 title: Installation
 layout: default
-nav_order: 2
+nav_order: 1
+parent: For Developers (Build from Source)
 ---
 
 # Installation
@@ -15,6 +16,15 @@ Install dependencies and set up a working build environment.
 
 1. TOC
 {:toc}
+
+---
+
+## Clone the repository
+
+```bash
+git clone https://github.com/holytorch/HolyUUV_GCS.git
+cd HolyUUV_GCS
+```
 
 ---
 
@@ -65,4 +75,4 @@ cd /workspace && ./scripts/install_deps.sh && cmake -B build && cmake --build bu
 
 ---
 
-Next: [Building from source]({% link pages/building.md %}).
+Next: [Building from source]({% link pages/dev/building.md %}).
