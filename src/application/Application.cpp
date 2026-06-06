@@ -27,7 +27,6 @@ Application::Application(QObject* parent) : QObject(parent) {}
 //   2. LinkManager ↔ MainWindow 연결 (접속·해제 상태 표시)
 //   3. LinkManager → MavlinkManager → VehicleState 데이터 파이프라인 구성
 //   4. MainWindow 표시
-//   5. USB 시리얼 포트 스캔 → 감지되면 SerialLink, 없으면 UdpLink(14550) 사용
 // ─────────────────────────────────────────────────────────────────────────────
 bool Application::initialize()
 {

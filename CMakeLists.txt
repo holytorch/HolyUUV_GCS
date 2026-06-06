@@ -19,7 +19,7 @@ MESSAGE(STATUS "Project: ${PROJECT_NAME}")
 # ─────────────────────────────────────────────
 # Qt5
 # ─────────────────────────────────────────────
-FIND_PACKAGE(Qt5 REQUIRED COMPONENTS Core Widgets Network SerialPort Location Quick QuickWidgets Positioning Sql
+FIND_PACKAGE(Qt5 REQUIRED COMPONENTS Core Widgets Network Location Quick QuickWidgets Positioning Sql
              3DCore 3DRender 3DExtras 3DInput)
 
 # ─────────────────────────────────────────────
@@ -78,7 +78,6 @@ TARGET_LINK_LIBRARIES(${PROJECT_NAME} PRIVATE
     Qt5::Core
     Qt5::Widgets
     Qt5::Network
-    Qt5::SerialPort
     Qt5::Location
     Qt5::Quick
     Qt5::QuickWidgets
