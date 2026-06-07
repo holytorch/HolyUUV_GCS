@@ -182,15 +182,18 @@ Once ArduSub is up and streaming MAVLink, follow these steps in the GCS:
 
    ![Step 3]({{ '/assets/images/3.png' | relative_url }})
 
-4. Back in the popup, press **Connect** next to the entry.
+4. Back in the popup, press **Connect** next to the entry. As shown in the image, the vehicle
+   will appear under the **VEHICLES** section. If it doesn't, the connection probably failed.
+   To disconnect, just press **Disconnect**.
 
    ![Step 4]({{ '/assets/images/4.png' | relative_url }})
 
 The **link card** at the top switches from `● NO LINKED` (red) to `● LINKED` (green) as soon as
 the vehicle's HEARTBEAT is received.
 
-## 5. Vehicle detected
+## 5. Take control
 
-Once connected, the **`sys_id`** card will show a vehicle number — this means the GCS has
-successfully detected the simulated vehicle and is receiving its HEARTBEAT.
+Click the vehicle you want to inspect in the **VEHICLES** section — its information appears in
+that vehicle's **CONTROL CENTER**, and the map pans over to its location. From there you can
+**ARM** the vehicle and start piloting it. That's it — enjoy!
 

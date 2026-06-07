@@ -1900,11 +1900,16 @@ Rectangle {
                     }
                 }
 
+                // 모드 버튼은 ARMED 상태에서만 노출 (DISARMED일 땐 ARM 버튼만 보임).
+                // Column은 visible=false 자식을 레이아웃에서 제외하므로 공간도 함께 접힘.
                 Loader { sourceComponent: modeBtnComponent;
+                         visible: vehicle && vehicle.armed
                          onLoaded: { item.modeName = "MANUAL";    item.label = "MANUAL"; } }
                 Loader { sourceComponent: modeBtnComponent;
+                         visible: vehicle && vehicle.armed
                          onLoaded: { item.modeName = "STABILIZE"; item.label = "STABILIZE"; } }
                 Loader { sourceComponent: modeBtnComponent;
+                         visible: vehicle && vehicle.armed
                          onLoaded: { item.modeName = "ALT_HOLD";  item.label = "ALT HOLD"; } }
             }
         }
