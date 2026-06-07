@@ -197,3 +197,5 @@ Click the vehicle you want to inspect in the **VEHICLES** section — its inform
 that vehicle's **CONTROL CENTER**, and the map pans over to its location. From there you can
 **ARM** the vehicle and start piloting it. That's it — enjoy!
 
+![Take control]({{ '/assets/images/5.png' | relative_url }})
+
