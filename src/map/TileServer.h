@@ -27,6 +27,7 @@ public:
     static constexpr quint16 PORT = 17777;
 
     explicit TileServer(TileCache* cache, QObject* parent = nullptr);
+    ~TileServer() override;
 
     bool start();
 

@@ -8,32 +8,42 @@ LogFeed*         LogFeed::_instance     = nullptr;
 QtMessageHandler LogFeed::_prevHandler  = nullptr;
 
 
-LogFeed::LogFeed(VehicleState* state, QObject* parent)
-    : QObject(parent), _state(state)
+LogFeed::LogFeed(QObject* parent)
+    : QObject(parent)
 {
     // 메시지 핸들러는 프로세스 전역 — _instance 첫 LogFeed만 핸들러 설치.
+    // 부팅 가장 앞에서 설치돼야 이후 모든 [init] 로그가 인앱 피드에도 캡처된다.
     if (!_instance) {
         _instance    = this;
         _prevHandler = qInstallMessageHandler(_qtMessageHandler);
     }
 
-    if (_state) {
-        connect(_state, &VehicleState::armedChanged,
-                this, &LogFeed::_onArmedChanged);
-        connect(_state, &VehicleState::flightModeChanged,
-                this, &LogFeed::_onFlightModeChanged);
-        connect(_state, &VehicleState::heartbeatStatusChanged,
-                this, &LogFeed::_onHeartbeatStatusChanged);
-        connect(_state, &VehicleState::gpsChanged,
-                this, &LogFeed::_onGpsChanged);
-        connect(_state, &VehicleState::batteryChanged,
-                this, &LogFeed::_onBatteryChanged);
-    }
+    qInfo("[init] LogFeed");
+}
+
+
+// VehicleState가 생성된 뒤(Application 생성자) 호출되어 상태 전이 로그를 연결한다.
+void LogFeed::bindVehicle(VehicleState* state)
+{
+    _state = state;
+    if (!_state) return;
+
+    connect(_state, &VehicleState::armedChanged,
+            this, &LogFeed::_onArmedChanged);
+    connect(_state, &VehicleState::flightModeChanged,
+            this, &LogFeed::_onFlightModeChanged);
+    connect(_state, &VehicleState::heartbeatStatusChanged,
+            this, &LogFeed::_onHeartbeatStatusChanged);
+    connect(_state, &VehicleState::gpsChanged,
+            this, &LogFeed::_onGpsChanged);
+    connect(_state, &VehicleState::batteryChanged,
+            this, &LogFeed::_onBatteryChanged);
 }
 
 
 LogFeed::~LogFeed()
 {
+    qInfo("[exit] LogFeed");
     if (_instance == this) {
         qInstallMessageHandler(_prevHandler);
         _instance    = nullptr;

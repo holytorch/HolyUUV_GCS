@@ -5,12 +5,14 @@
 #include <QUrl>
 #include <QDebug>
 #include <QDir>
-#include <QPainter>
 #include <cmath>
+#include <vector>
+#include <algorithm>
 
+#include <QQuaternion>
 #include <Qt3DCore/QEntity>
 #include <Qt3DCore/QTransform>
-#include <Qt3DExtras/QSphereMesh>
+#include <Qt3DExtras/QConeMesh>
 #include <Qt3DExtras/QPhongMaterial>
 #include <Qt3DExtras/QDiffuseMapMaterial>
 #include <Qt3DRender/QTexture>
@@ -25,75 +27,93 @@
 static const QString OSM_URL     = "http://localhost:17777/osm/%1/%2/%3.png";
 static const QString VOYAGER_URL = "http://localhost:17777/voyager/%1/%2/%3.png";
 
+// 수역 마스크 → 높이값
+static constexpr float SEA_DEPTH = -1000.0f;
+static constexpr float LAND_H    =     1.0f;
+
 
 double TerrainScene::metersPerPixel(double lat, int z)
 {
     return 156543.03392 * std::cos(lat * M_PI / 180.0) / std::pow(2.0, z);
 }
 
-double TerrainScene::globalPixToLon(double gx, int z)
+void TerrainScene::latLonToGlobalPx(double lat, double lon, int z, double& gx, double& gy)
 {
-    return gx / (256.0 * (1 << z)) * 360.0 - 180.0;
-}
-
-double TerrainScene::globalPixToLat(double gy, int z)
-{
-    double n = static_cast<double>(1 << z);
-    return std::atan(std::sinh(M_PI * (1.0 - 2.0 * gy / (n * 256.0)))) * 180.0 / M_PI;
+    const double n     = static_cast<double>(1 << z);
+    const double fracX = (lon + 180.0) / 360.0 * n;
+    const double latR  = lat * M_PI / 180.0;
+    const double fracY = (1.0 - std::log(std::tan(latR) + 1.0 / std::cos(latR)) / M_PI)
+                         / 2.0 * n;
+    gx = fracX * 256.0;
+    gy = fracY * 256.0;
 }
 
 
 TerrainScene::TerrainScene(QObject* parent)
     : QObject(parent)
 {
-    // Entity 트리는 attachTo() 시점에 외부 parent의 자식으로 생성한다.
-    // 그래야 parent destroy 시 자동 정리되고, _rootEntity QPointer가 null로 바뀐다.
     connect(&_nam, &QNetworkAccessManager::finished,
             this, &TerrainScene::_onReplyFinished);
+    qInfo("[init] TerrainScene");
 }
 
-TerrainScene::~TerrainScene() = default;
+TerrainScene::~TerrainScene()
+{
+    qInfo("[exit] TerrainScene");
+}
 
 
-// 외부 parent(Qt3DWindow root 또는 QML Scene3D Entity)에 entity 트리를 생성한다.
-// 호출 시점에 mesh 데이터가 캐시되어 있으면 즉시 rebuild (네트워크 재fetch 없음).
-// 캐시 없으면 _startFetch()를 발동 (첫 attachTo 케이스).
-//
-// _rootEntity는 외부 parent 소유 — parent destroy 시 자동 정리되고
-// QPointer 덕에 dangling 없이 null이 된다. 다음 attachTo 호출에서 다시 빌드됨.
+// ─────────────────────────────────────────────────────────────────────────────
+// attachTo()
+// 외부 parent(QML Scene3D Entity)에 _rootEntity를 새로 만든다.
+// 이미 받아둔 청크 이미지가 있으면 네트워크 없이 메시를 재빌드한다.
+// ─────────────────────────────────────────────────────────────────────────────
 void TerrainScene::attachTo(Qt3DCore::QEntity* parent)
 {
     if (!parent) return;
 
-    // 이전 _rootEntity가 살아 있으면(즉, 이전 parent가 아직 살아 있으면)
-    // 명시적으로 deleteLater() — 새 parent에서 새 entity 트리를 다시 빌드.
     if (_rootEntity)
         _rootEntity->deleteLater();
 
-    _rootEntity = new Qt3DCore::QEntity(parent);
-    _meshEntity = nullptr;
+    _rootEntity    = new Qt3DCore::QEntity(parent);
     _vehicleMarker = nullptr;
-    _vehicleXform = nullptr;
+    _vehicleXform  = nullptr;
 
-    if (_currentTile.isValid()) {
-        // 캐시된 높이맵/텍스처로 즉시 시각화 복원 (네트워크 무관)
-        _buildMesh();
+    if (!_chunks.isEmpty()) {
+        // 캐시된 타일 이미지로 즉시 메시 재빌드
+        for (auto it = _chunks.begin(); it != _chunks.end(); ++it) {
+            it->entity = nullptr;
+            it->built  = false;
+            if (it->osmReady && it->voyagerReady)
+                _buildChunkMesh(it.key().first, it.key().second);
+        }
         _updateVehicleMarker();
         _resetCameraToTerrain();
-    } else if (_firstFixReceived && _vehicleLat != 0.0 && _vehicleLon != 0.0) {
-        // 3D 모드 진입 전에 이미 GPS fix 받은 경우 — 로봇 위치로 타일 로드
+    } else if (_firstFixReceived && (_vehicleLat != 0.0 || _vehicleLon != 0.0)) {
         loadTile(_vehicleLat, _vehicleLon, _zoom);
     }
-    // 위 두 경우 모두 해당 없으면(no cache, no GPS) fetch는 QML 호출자가 트리거.
+    // 둘 다 아니면(no cache, no GPS) QML 호출자가 loadTile로 트리거.
 }
 
 
+// ─────────────────────────────────────────────────────────────────────────────
+// loadTile()
+// 전역 좌표 원점을 (최초 1회) 고정하고, 현재 위치 주변 청크 로드를 시작한다.
+// ─────────────────────────────────────────────────────────────────────────────
 void TerrainScene::loadTile(double lat, double lon, int zoom)
 {
     _lat  = lat;
     _lon  = lon;
     _zoom = zoom;
-    _startFetch();
+
+    if (!_originSet) {
+        double gx, gy;
+        latLonToGlobalPx(lat, lon, zoom, gx, gy);
+        _originPxX = static_cast<int>(gx);
+        _originPxY = static_cast<int>(gy);
+        _originSet = true;
+    }
+    _updateChunks();
 }
 
 
@@ -106,308 +126,239 @@ void TerrainScene::updateVehiclePosition(double lat, double lon)
 
     if (!_firstFixReceived) {
         _firstFixReceived = true;
-        // entity 트리가 살아 있을 때만 즉시 fetch.
-        // 아직 attachTo 전이면 lat/lon만 저장 — 다음 attachTo가 이 좌표로 fetch 시작.
-        if (_rootEntity)
+        // entity 트리가 살아 있을 때만 즉시 로드. 아직 attachTo 전이면 좌표만 저장.
+        if (_rootEntity) {
+            // 3D가 이미 기본 좌표로 열려 있을 수 있다. 첫 실제 GPS fix가 오면
+            // 원점을 로봇 위치로 재설정하고 청크를 다시 로드한다 (로봇이 화면 밖으로
+            // 벗어나는 것을 방지).
+            for (auto& ch : _chunks)
+                if (ch.entity) ch.entity->deleteLater();
+            _chunks.clear();
+            _originSet = false;
+            _curTileX  = INT_MIN;
+            _curTileY  = INT_MIN;
             loadTile(lat, lon, _zoom);
-    } else if (_rootEntity && _meshEntity) {
-        _updateVehicleMarker();
+            _updateVehicleMarker();
+            _resetCameraToTerrain();
+        }
+        return;
+    }
+
+    if (!_rootEntity) return;
+
+    _updateVehicleMarker();
+
+    // 로봇이 새 타일로 넘어가면 청크 갱신 (마인크래프트 청크 로드)
+    if (_originSet) {
+        double gx, gy;
+        latLonToGlobalPx(lat, lon, _zoom, gx, gy);
+        const int tx = static_cast<int>(std::floor(gx / 256.0));
+        const int ty = static_cast<int>(std::floor(gy / 256.0));
+        if (tx != _curTileX || ty != _curTileY)
+            _updateChunks();
     }
 }
 
 
-// ─────────────────────────────────────────────────────────────────────────────
-// _startFetch()
-// 중심 위경도를 Web Mercator 픽셀로 변환하고 필요한 타일 범위를 동시에 요청.
-// ─────────────────────────────────────────────────────────────────────────────
-void TerrainScene::_startFetch()
+void TerrainScene::updateVehicleDepth(double depthMeters)
 {
-    double mpp    = metersPerPixel(_lat, _zoom);
-    int    halfPx = std::max(2, static_cast<int>(std::ceil(500.0 / mpp)));
+    _vehicleDepth = (depthMeters > 0.0) ? depthMeters : 0.0;
+    if (_rootEntity)
+        _updateVehicleMarker();
+}
 
-    double fracX = (_lon + 180.0) / 360.0 * (1 << _zoom);
-    double latR  = _lat * M_PI / 180.0;
-    double fracY = (1.0 - std::log(std::tan(latR) + 1.0 / std::cos(latR)) / M_PI)
-                   / 2.0 * (1 << _zoom);
-    int gCX = static_cast<int>(fracX * 256);
-    int gCY = static_cast<int>(fracY * 256);
 
-    _osmTX0 = (gCX - halfPx) / 256;
-    _osmTY0 = (gCY - halfPx) / 256;
-    int tx1 = (gCX + halfPx) / 256;
-    int ty1 = (gCY + halfPx) / 256;
-    _osmTNX = tx1 - _osmTX0 + 1;
-    _osmTNY = ty1 - _osmTY0 + 1;
+// ─────────────────────────────────────────────────────────────────────────────
+// _updateChunks()
+// 중심(로봇) 타일 기준 렌더 반경 안의 청크를 로드하고, 밖의 청크를 언로드한다.
+// 로드 순서: 중심 → 전방(heading) → 거리순.
+// ─────────────────────────────────────────────────────────────────────────────
+void TerrainScene::_updateChunks()
+{
+    if (!_originSet || !_rootEntity) return;
 
-    _stitchCX  = gCX - _osmTX0 * 256;
-    _stitchCY  = gCY - _osmTY0 * 256;
-    _subHalfPx = halfPx;
+    // 중심 = 로봇 위치(있으면), 없으면 마지막 loadTile 좌표
+    double clat = (_firstFixReceived && (_vehicleLat != 0.0 || _vehicleLon != 0.0))
+                  ? _vehicleLat : _lat;
+    double clon = (_firstFixReceived && (_vehicleLat != 0.0 || _vehicleLon != 0.0))
+                  ? _vehicleLon : _lon;
 
-    _osmImages.clear();
-    _osmPending = _osmTNX * _osmTNY;
+    double gx, gy;
+    latLonToGlobalPx(clat, clon, _zoom, gx, gy);
+    const int ctx = static_cast<int>(std::floor(gx / 256.0));
+    const int cty = static_cast<int>(std::floor(gy / 256.0));
+    _curTileX = ctx;
+    _curTileY = cty;
 
-    _voyagerImages.clear();
-    _voyagerPending = _osmTNX * _osmTNY;
+    const int R = kRenderDist;
 
-    for (int r = 0; r < _osmTNY; ++r) {
-        for (int c = 0; c < _osmTNX; ++c) {
-            int otx = _osmTX0 + c, oty = _osmTY0 + r;
-
-            auto* osmRep = _nam.get(QNetworkRequest(
-                QUrl(OSM_URL.arg(_zoom).arg(otx).arg(oty))));
-            osmRep->setProperty("osmTX", otx);
-            osmRep->setProperty("osmTY", oty);
-
-            auto* posRep = _nam.get(QNetworkRequest(
-                QUrl(VOYAGER_URL.arg(_zoom).arg(otx).arg(oty))));
-            posRep->setProperty("positronTX", otx);
-            posRep->setProperty("positronTY", oty);
+    // 1) 언로드 — 렌더 반경 밖 청크 제거
+    for (auto it = _chunks.begin(); it != _chunks.end(); ) {
+        const int tx = it.key().first;
+        const int ty = it.key().second;
+        if (std::abs(tx - ctx) > R || std::abs(ty - cty) > R) {
+            if (it->entity)
+                it->entity->deleteLater();
+            it = _chunks.erase(it);
+        } else {
+            ++it;
         }
     }
+
+    // 2) 로드 — 반경 안의 미보유 청크를 우선순위 정렬해 요청
+    const double hdg = _vehicleHeading * M_PI / 180.0;
+    const double fx  = std::sin(hdg);   // 그리드: +x=동, +y=남 (heading 0=N → -y)
+    const double fy  = -std::cos(hdg);
+
+    struct Req { int tx, ty; double score; };
+    std::vector<Req> todo;
+    for (int dy = -R; dy <= R; ++dy) {
+        for (int dx = -R; dx <= R; ++dx) {
+            const int tx = ctx + dx;
+            const int ty = cty + dy;
+            if (_chunks.contains(qMakePair(tx, ty))) continue;
+            const double dist = std::sqrt(static_cast<double>(dx * dx + dy * dy));
+            double align = 0.0;
+            if (dist > 1e-6) align = (dx * fx + dy * fy) / dist;   // 전방 정렬도 [-1,1]
+            // 점수 낮을수록 먼저: 중심(거리0) → 전방 → 측면 → 후방, 그다음 먼 거리
+            todo.push_back({tx, ty, dist - 0.5 * align});
+        }
+    }
+    std::sort(todo.begin(), todo.end(),
+              [](const Req& a, const Req& b) { return a.score < b.score; });
+
+    for (const auto& r : todo)
+        _requestChunk(r.tx, r.ty);
+}
+
+
+void TerrainScene::_requestChunk(int tx, int ty)
+{
+    // placeholder 항목 생성 (중복 요청 방지 — _updateChunks의 contains 체크가 본다)
+    Chunk& ch = _chunks[qMakePair(tx, ty)];
+    ch.osmReady = ch.voyagerReady = ch.built = false;
+
+    auto* osmRep = _nam.get(QNetworkRequest(QUrl(OSM_URL.arg(_zoom).arg(tx).arg(ty))));
+    osmRep->setProperty("ctx",  tx);
+    osmRep->setProperty("cty",  ty);
+    osmRep->setProperty("kind", QStringLiteral("osm"));
+
+    auto* voyRep = _nam.get(QNetworkRequest(QUrl(VOYAGER_URL.arg(_zoom).arg(tx).arg(ty))));
+    voyRep->setProperty("ctx",  tx);
+    voyRep->setProperty("cty",  ty);
+    voyRep->setProperty("kind", QStringLiteral("voyager"));
 }
 
 
 void TerrainScene::_onReplyFinished(QNetworkReply* reply)
 {
     reply->deleteLater();
-    if (reply->property("positronTX").isValid())
-        _handleVoyagerTile(reply);
-    else
-        _handleOsmTile(reply);
-}
 
+    const int     tx   = reply->property("ctx").toInt();
+    const int     ty   = reply->property("cty").toInt();
+    const QString kind = reply->property("kind").toString();
 
-void TerrainScene::_handleOsmTile(QNetworkReply* reply)
-{
-    int otx = reply->property("osmTX").toInt();
-    int oty = reply->property("osmTY").toInt();
+    auto key = qMakePair(tx, ty);
+    auto it  = _chunks.find(key);
+    if (it == _chunks.end()) return;   // 이미 언로드된 청크의 늦은 응답 — 무시
+    Chunk& ch = it.value();
 
     if (reply->error() == QNetworkReply::NoError) {
         QImage img;
         if (img.loadFromData(reply->readAll()) && !img.isNull()) {
-            _osmImages[qMakePair(otx, oty)] =
-                img.scaled(256, 256).convertToFormat(QImage::Format_RGB32);
+            QImage scaled = img.scaled(256, 256).convertToFormat(QImage::Format_RGB32);
+            if (kind == QLatin1String("voyager")) {
+                ch.voyager      = scaled;
+                ch.voyagerReady = true;
+            } else {
+                ch.osm      = scaled;
+                ch.osmReady = true;
+            }
         } else {
-            qWarning("OSM tile (%d,%d): 이미지 디코딩 실패", otx, oty);
+            qWarning("Chunk (%d,%d) %s: 이미지 디코딩 실패", tx, ty, qPrintable(kind));
         }
     } else {
-        qWarning("OSM tile (%d,%d) error: %s", otx, oty,
+        qWarning("Chunk (%d,%d) %s error: %s", tx, ty, qPrintable(kind),
                  qPrintable(reply->errorString()));
     }
 
-    if (--_osmPending <= 0 && _voyagerPending <= 0)
-        _stitchAndBuild();
-}
-
-
-void TerrainScene::_handleVoyagerTile(QNetworkReply* reply)
-{
-    int otx = reply->property("positronTX").toInt();
-    int oty = reply->property("positronTY").toInt();
-
-    if (reply->error() == QNetworkReply::NoError) {
-        QImage img;
-        if (img.loadFromData(reply->readAll()) && !img.isNull()) {
-            _voyagerImages[qMakePair(otx, oty)] =
-                img.scaled(256, 256).convertToFormat(QImage::Format_RGB32);
-        } else {
-            qWarning("Voyager tile (%d,%d): 이미지 디코딩 실패", otx, oty);
-        }
-    } else {
-        qWarning("Voyager tile (%d,%d) error: %s", otx, oty,
-                 qPrintable(reply->errorString()));
-    }
-
-    if (--_voyagerPending <= 0 && _osmPending <= 0)
-        _stitchAndBuild();
+    if (ch.osmReady && ch.voyagerReady && !ch.built && _rootEntity)
+        _buildChunkMesh(tx, ty);
 }
 
 
 // ─────────────────────────────────────────────────────────────────────────────
-// _stitchAndBuild()
-// 모든 타일이 수신되면: 스티칭 → 수역 마스크 → 블러 → 텍스처 저장 → buildMesh
-// 자세한 알고리즘 설명은 TerrainWidget.cpp의 동일 함수 주석 참고.
+// _buildChunkMesh()
+// 한 타일(청크)의 높이맵 + 텍스처로 Qt3D 메시 엔티티를 만든다.
+// 정점은 전역 좌표계에 배치되어 인접 청크와 자연히 이어진다.
 // ─────────────────────────────────────────────────────────────────────────────
-void TerrainScene::_stitchAndBuild()
-{
-    QImage darkStitched(_osmTNX * 256, _osmTNY * 256, QImage::Format_RGB32);
-    darkStitched.fill(Qt::black);
-    {
-        QPainter p(&darkStitched);
-        for (int r = 0; r < _osmTNY; ++r)
-            for (int c = 0; c < _osmTNX; ++c) {
-                auto key = qMakePair(_osmTX0 + c, _osmTY0 + r);
-                if (_osmImages.contains(key))
-                    p.drawImage(c * 256, r * 256, _osmImages[key]);
-            }
-    }
-
-    QImage lightStitched(_osmTNX * 256, _osmTNY * 256, QImage::Format_RGB32);
-    lightStitched.fill(Qt::white);
-    {
-        QPainter p(&lightStitched);
-        for (int r = 0; r < _osmTNY; ++r)
-            for (int c = 0; c < _osmTNX; ++c) {
-                auto key = qMakePair(_osmTX0 + c, _osmTY0 + r);
-                if (_voyagerImages.contains(key))
-                    p.drawImage(c * 256, r * 256, _voyagerImages[key]);
-            }
-    }
-
-    const int   subW      = _subHalfPx * 2 + 1;
-    const int   subH      = _subHalfPx * 2 + 1;
-    const float SEA_DEPTH = -1000.0f;
-    const float LAND_H    = 1.0f;
-
-    _currentTile.tileZ  = _zoom;
-    _currentTile.tileX  = _osmTX0;
-    _currentTile.tileY  = _osmTY0;
-    _currentTile.width  = subW;
-    _currentTile.height = subH;
-    _currentTile.heights.resize(subW * subH);
-
-    // 수역 판별
-    for (int sy = 0; sy < subH; ++sy) {
-        for (int sx = 0; sx < subW; ++sx) {
-            int  px  = qBound(0, _stitchCX - _subHalfPx + sx, lightStitched.width()  - 1);
-            int  py  = qBound(0, _stitchCY - _subHalfPx + sy, lightStitched.height() - 1);
-            QRgb col = lightStitched.pixel(px, py);
-            int  r = qRed(col), g = qGreen(col), b = qBlue(col);
-            bool water = (b > r + 15) && (b > 150) && (g > 150);
-            _currentTile.heights[sy * subW + sx] = water ? SEA_DEPTH : LAND_H;
-        }
-    }
-
-    // 분리형 박스 블러 1회로 해안선 계단 최소화 (최약 후처리)
-    constexpr int BLUR_RADIUS = 1;
-    constexpr int BLUR_PASS   = 1;
-    std::vector<float> tmp(subW * subH);
-    auto& h = _currentTile.heights;
-    for (int pass = 0; pass < BLUR_PASS; ++pass) {
-        for (int sy = 0; sy < subH; ++sy) {
-            for (int sx = 0; sx < subW; ++sx) {
-                float sum = 0.f; int cnt = 0;
-                for (int d = -BLUR_RADIUS; d <= BLUR_RADIUS; ++d) {
-                    int nx = qBound(0, sx + d, subW - 1);
-                    sum += h[sy * subW + nx]; ++cnt;
-                }
-                tmp[sy * subW + sx] = sum / cnt;
-            }
-        }
-        for (int sy = 0; sy < subH; ++sy) {
-            for (int sx = 0; sx < subW; ++sx) {
-                float sum = 0.f; int cnt = 0;
-                for (int d = -BLUR_RADIUS; d <= BLUR_RADIUS; ++d) {
-                    int ny = qBound(0, sy + d, subH - 1);
-                    sum += tmp[ny * subW + sx]; ++cnt;
-                }
-                h[sy * subW + sx] = sum / cnt;
-            }
-        }
-    }
-
-    // 텍스처 저장
-    static int seq = 0;
-    ++seq;
-    _darkTexPath = QString("%1/holyuuv_dark_%2.png").arg(QDir::tempPath()).arg(seq);
-    darkStitched.save(_darkTexPath);
-    _osmTexPath = _darkTexPath;
-
-    // entity 트리가 살아 있을 때만 시각화 빌드.
-    // null이면 _currentTile만 캐시 — 다음 attachTo가 즉시 빌드함.
-    if (_rootEntity) {
-        _buildMesh();
-        _updateVehicleMarker();
-        _resetCameraToTerrain();
-    }
-
-    emit terrainReady();
-}
-
-
-// ─────────────────────────────────────────────────────────────────────────────
-// _buildMesh()
-// _currentTile 높이맵 + _osmTexPath 텍스처로 Qt3D 메시 entity 생성.
-// 자세한 정점 포맷 설명은 TerrainWidget.cpp 참고.
-// ─────────────────────────────────────────────────────────────────────────────
-void TerrainScene::_buildMesh()
+void TerrainScene::_buildChunkMesh(int tx, int ty)
 {
     if (!_rootEntity) return;
+    auto it = _chunks.find(qMakePair(tx, ty));
+    if (it == _chunks.end()) return;
+    Chunk& ch = it.value();
+    if (ch.osm.isNull() || ch.voyager.isNull()) return;
 
-    if (_meshEntity) {
-        _meshEntity->setParent(static_cast<Qt3DCore::QNode*>(nullptr));
-        delete _meshEntity;
-        _meshEntity = nullptr;
+    if (ch.entity) {
+        ch.entity->setParent(static_cast<Qt3DCore::QNode*>(nullptr));
+        delete ch.entity;
+        ch.entity = nullptr;
     }
 
-    const TerrainTile& tile = _currentTile;
-    const int   subW  = tile.width;
-    const int   subH  = tile.height;
-    const float scale = _worldHalfSize / static_cast<float>(_subHalfPx);
+    const int N = kChunkQuads;   // quad 수
+    const int V = N + 1;         // 한 변 정점 수
 
-    const float texW  = static_cast<float>(_osmTNX * 256);
-    const float texH  = static_cast<float>(_osmTNY * 256);
-    const int   imgX0 = _stitchCX - _subHalfPx;
-    const int   imgY0 = _stitchCY - _subHalfPx;
+    const double tilePxX = static_cast<double>(tx) * 256.0;
+    const double tilePxY = static_cast<double>(ty) * 256.0;
 
-    // ── 메시 다운샘플 ─────────────────────────────────────────────────────────
-    // 높이맵(subW×subH)은 줌16에서 529×529 ≈ 28만 정점이라 GPU 셰이더 컴파일/래스터화가
-    // 무겁다 (특히 소프트웨어 렌더링 환경에서 첫 프레임 수십 초). 시각화에 그 정도 밀도는
-    // 불필요하므로 출력 그리드를 MAX_GRID 이하로 제한한다 (텍스처는 풀해상도 유지).
-    // 출력 정점 i → 원본 좌표 sc = round(i*(subW-1)/(outW-1)) 로 비례 매핑해 가장자리를 정렬.
-    constexpr int MAX_GRID = 180;
-    const int outW = std::min(subW, MAX_GRID);
-    const int outH = std::min(subH, MAX_GRID);
-    auto srcX = [&](int i) {
-        return (outW <= 1) ? 0 : static_cast<int>(std::lround(
-            static_cast<double>(i) * (subW - 1) / (outW - 1)));
-    };
-    auto srcY = [&](int j) {
-        return (outH <= 1) ? 0 : static_cast<int>(std::lround(
-            static_cast<double>(j) * (subH - 1) / (outH - 1)));
+    // 수역 마스크 → 높이 (타일 픽셀 0..255)
+    auto heightAt = [&](int px, int py) -> float {
+        px = qBound(0, px, 255);
+        py = qBound(0, py, 255);
+        const QRgb c = ch.voyager.pixel(px, py);
+        const int  r = qRed(c), g = qGreen(c), b = qBlue(c);
+        const bool water = (b > r + 15) && (b > 150) && (g > 150);
+        return water ? SEA_DEPTH : LAND_H;
     };
 
-    QByteArray vertexBytes(outW * outH * 8 * sizeof(float), Qt::Uninitialized);
+    QByteArray vertexBytes(V * V * 8 * sizeof(float), Qt::Uninitialized);
     float* vp = reinterpret_cast<float*>(vertexBytes.data());
 
-    for (int oj = 0; oj < outH; ++oj) {
-        const int sr = srcY(oj);
-        for (int oi = 0; oi < outW; ++oi) {
-            const int sc = srcX(oi);
-            float h = tile.heightAt(sc, sr);
+    for (int j = 0; j < V; ++j) {
+        const int py = (j * 255) / N;
+        for (int i = 0; i < V; ++i) {
+            const int px = (i * 255) / N;
+            const float h = heightAt(px, py);
 
-            *vp++ = (sc - _subHalfPx) * scale;
+            *vp++ = _worldX(tilePxX + px);
             *vp++ = h * _heightScale;
-            *vp++ = (sr - _subHalfPx) * scale;
+            *vp++ = _worldZ(tilePxY + py);
 
-            int sc0 = std::max(0, sc - 1), sc1 = std::min(subW - 1, sc + 1);
-            int sr0 = std::max(0, sr - 1), sr1 = std::min(subH - 1, sr + 1);
-            float dx   = (sc1 - sc0) * scale;
-            float dz   = (sr1 - sr0) * scale;
-            float dy_x = (tile.heightAt(sc1, sr) - tile.heightAt(sc0, sr)) * _heightScale;
-            float dy_z = (tile.heightAt(sc, sr1) - tile.heightAt(sc, sr0)) * _heightScale;
-            float nx = -dy_x * dz;
-            float ny =  dx * dz;
-            float nz = -dy_z * dx;
-            float nlen = std::sqrt(nx * nx + ny * ny + nz * nz);
-            if (nlen > 1e-6f) { nx /= nlen; ny /= nlen; nz /= nlen; }
-            else               { nx = 0.f;  ny = 1.f;   nz = 0.f; }
+            // 노멀 (중앙 차분)
+            const float hl = heightAt(px - 1, py), hr = heightAt(px + 1, py);
+            const float hd = heightAt(px, py - 1), hu = heightAt(px, py + 1);
+            float nx = (hl - hr) * _heightScale;
+            float nz = (hd - hu) * _heightScale;
+            float ny = 2.0f * kWorldPerPixel;
+            const float nl = std::sqrt(nx * nx + ny * ny + nz * nz);
+            if (nl > 1e-6f) { nx /= nl; ny /= nl; nz /= nl; }
+            else            { nx = 0.f; ny = 1.f; nz = 0.f; }
             *vp++ = nx; *vp++ = ny; *vp++ = nz;
 
-            *vp++ = (imgX0 + sc) / texW;
-            *vp++ = (imgY0 + sr) / texH;
+            *vp++ = static_cast<float>(px) / 255.0f;   // u
+            *vp++ = static_cast<float>(py) / 255.0f;   // v
         }
     }
 
-    const int quadCount = (outW - 1) * (outH - 1);
-    QByteArray indexBytes(quadCount * 6 * sizeof(uint32_t), Qt::Uninitialized);
+    QByteArray indexBytes(N * N * 6 * sizeof(uint32_t), Qt::Uninitialized);
     uint32_t* ip = reinterpret_cast<uint32_t*>(indexBytes.data());
-    for (int oj = 0; oj < outH - 1; ++oj) {
-        for (int oi = 0; oi < outW - 1; ++oi) {
-            uint32_t tl = static_cast<uint32_t>(oj * outW + oi);
-            uint32_t tr = tl + 1;
-            uint32_t bl = tl + static_cast<uint32_t>(outW);
-            uint32_t br = bl + 1;
+    for (int j = 0; j < N; ++j) {
+        for (int i = 0; i < N; ++i) {
+            const uint32_t tl = static_cast<uint32_t>(j * V + i);
+            const uint32_t tr = tl + 1;
+            const uint32_t bl = tl + static_cast<uint32_t>(V);
+            const uint32_t br = bl + 1;
             *ip++ = tl; *ip++ = bl; *ip++ = tr;
             *ip++ = tr; *ip++ = bl; *ip++ = br;
         }
@@ -426,7 +377,7 @@ void TerrainScene::_buildMesh()
         a->setVertexSize(size);
         a->setByteOffset(offset * sizeof(float));
         a->setByteStride(8 * sizeof(float));
-        a->setCount(static_cast<uint>(outW * outH));
+        a->setCount(static_cast<uint>(V * V));
         a->setBuffer(vBuf);
         geometry->addAttribute(a);
     };
@@ -437,7 +388,7 @@ void TerrainScene::_buildMesh()
     auto* idxAttr = new Qt3DRender::QAttribute(geometry);
     idxAttr->setAttributeType(Qt3DRender::QAttribute::IndexAttribute);
     idxAttr->setVertexBaseType(Qt3DRender::QAttribute::UnsignedInt);
-    idxAttr->setCount(static_cast<uint>(quadCount * 6));
+    idxAttr->setCount(static_cast<uint>(N * N * 6));
     idxAttr->setBuffer(iBuf);
     geometry->addAttribute(idxAttr);
 
@@ -445,11 +396,18 @@ void TerrainScene::_buildMesh()
     renderer->setGeometry(geometry);
     renderer->setPrimitiveType(Qt3DRender::QGeometryRenderer::Triangles);
 
+    // 텍스처 — OSM 타일을 임시 PNG로 저장 후 로드
+    static int seq = 0;
+    ++seq;
+    const QString texPath = QString("%1/holyuuv_chunk_%2_%3_%4.png")
+                                .arg(QDir::tempPath()).arg(tx).arg(ty).arg(seq);
+    ch.osm.save(texPath);
+
     auto* tex = new Qt3DRender::QTexture2D(_rootEntity.data());
     tex->setMinificationFilter(Qt3DRender::QAbstractTexture::Linear);
     tex->setMagnificationFilter(Qt3DRender::QAbstractTexture::Linear);
     auto* texImg = new Qt3DRender::QTextureImage(tex);
-    texImg->setSource(QUrl::fromLocalFile(_osmTexPath));
+    texImg->setSource(QUrl::fromLocalFile(texPath));
     texImg->setMirrored(false);
     tex->addTextureImage(texImg);
 
@@ -459,35 +417,14 @@ void TerrainScene::_buildMesh()
     mat->setSpecular(QColor(20, 20, 20));
     mat->setShininess(5.0f);
 
-    auto* meshEntity = new Qt3DCore::QEntity(_rootEntity.data());
-    meshEntity->addComponent(renderer);
-    meshEntity->addComponent(mat);
-    _meshEntity = meshEntity;
-}
+    auto* ent = new Qt3DCore::QEntity(_rootEntity.data());
+    ent->addComponent(renderer);
+    ent->addComponent(mat);
 
+    ch.entity = ent;
+    ch.built  = true;
 
-TerrainScene::WorldPos TerrainScene::_latLonToWorld(double lat, double lon) const
-{
-    WorldPos out;
-
-    const double fracX = (lon + 180.0) / 360.0 * (1 << _zoom);
-    const double latR  = lat * M_PI / 180.0;
-    const double fracY = (1.0 - std::log(std::tan(latR) + 1.0 / std::cos(latR)) / M_PI)
-                         / 2.0 * (1 << _zoom);
-    const double relX  = (fracX * 256 - _osmTX0 * 256) - _stitchCX;
-    const double relY  = (fracY * 256 - _osmTY0 * 256) - _stitchCY;
-
-    out.inBounds = (std::abs(relX) <= _subHalfPx && std::abs(relY) <= _subHalfPx);
-    if (!out.inBounds) return out;
-
-    const float scale = _worldHalfSize / static_cast<float>(_subHalfPx);
-    const int   sc    = static_cast<int>(relX + _subHalfPx);
-    const int   sr    = static_cast<int>(relY + _subHalfPx);
-
-    out.x        = static_cast<float>(relX) * scale;
-    out.z        = static_cast<float>(relY) * scale;
-    out.terrainH = _currentTile.heightAt(sc, sr);
-    return out;
+    emit terrainReady();
 }
 
 
@@ -495,21 +432,28 @@ void TerrainScene::_updateVehicleMarker()
 {
     if (!_rootEntity) return;
     if (_vehicleLat == 0.0 && _vehicleLon == 0.0) return;
-    if (!_currentTile.isValid()) return;
+    if (!_originSet) return;
 
-    const WorldPos p = _latLonToWorld(_vehicleLat, _vehicleLon);
+    double gx, gy;
+    latLonToGlobalPx(_vehicleLat, _vehicleLon, _zoom, gx, gy);
+    const float x = _worldX(gx);
+    const float z = _worldZ(gy);
 
-    const float yPos = p.inBounds
-        ? std::max(p.terrainH * _heightScale, 0.0f) + 5.0f
-        : 0.0f;
+    // 해수면(y=0) 기준 실제 수심만큼 마커를 내린다. 수평과 동일 스케일 → 비율 정확.
+    const float mpp           = static_cast<float>(metersPerPixel(_vehicleLat, _zoom));
+    const float unitsPerMeter = (mpp > 1e-9f) ? kWorldPerPixel / mpp : 0.0f;
+    const float y             = -static_cast<float>(_vehicleDepth) * unitsPerMeter;
 
     if (!_vehicleMarker) {
         auto* marker = new Qt3DCore::QEntity(_rootEntity.data());
 
-        auto* sphere = new Qt3DExtras::QSphereMesh(marker);
-        sphere->setRadius(5.0f);
-        sphere->setRings(12);
-        sphere->setSlices(12);
+        // 방향성 콘(화살표) — 뱃머리 방향을 가리킨다. 기본 축은 +Y(뾰족한 끝).
+        auto* cone = new Qt3DExtras::QConeMesh(marker);
+        cone->setTopRadius(0.0f);
+        cone->setBottomRadius(2.5f);
+        cone->setLength(9.0f);
+        cone->setRings(2);
+        cone->setSlices(16);
 
         auto* mat = new Qt3DExtras::QPhongMaterial(marker);
         mat->setAmbient(QColor(200, 20, 20));
@@ -519,7 +463,7 @@ void TerrainScene::_updateVehicleMarker()
 
         auto* xform = new Qt3DCore::QTransform();
 
-        marker->addComponent(sphere);
+        marker->addComponent(cone);
         marker->addComponent(mat);
         marker->addComponent(xform);
 
@@ -527,8 +471,14 @@ void TerrainScene::_updateVehicleMarker()
         _vehicleXform  = xform;
     }
 
-    _vehicleXform->setTranslation(QVector3D(p.x, yPos, p.z));
-    _vehicleMarker->setEnabled(p.inBounds);
+    // 콘을 수평으로 눕혀(tip→북) yaw만큼 회전 → 끝이 뱃머리(compass) 방향을 가리킴.
+    //   Rx(-90): +Y(끝) → -Z(북),  Ry(-yaw): 북 기준 시계방향으로 yaw만큼 스윙
+    const QQuaternion rot =
+        QQuaternion::fromAxisAndAngle(0.0f, 1.0f, 0.0f, -static_cast<float>(_vehicleYaw))
+      * QQuaternion::fromAxisAndAngle(1.0f, 0.0f, 0.0f, -90.0f);
+    _vehicleXform->setRotation(rot);
+    _vehicleXform->setTranslation(QVector3D(x, y, z));
+    _vehicleMarker->setEnabled(true);
 }
 
 
@@ -537,17 +487,17 @@ void TerrainScene::_resetCameraToTerrain()
     if (!_camera) return;
 
     QVector3D target(0.0f, 0.0f, 0.0f);
-    if (_vehicleMarker && _currentTile.isValid()) {
-        const WorldPos p = _latLonToWorld(_vehicleLat, _vehicleLon);
-        if (p.inBounds)
-            target = QVector3D(p.x, p.terrainH * _heightScale, p.z);
+    if (_originSet && (_vehicleLat != 0.0 || _vehicleLon != 0.0)) {
+        double gx, gy;
+        latLonToGlobalPx(_vehicleLat, _vehicleLon, _zoom, gx, gy);
+        target = QVector3D(_worldX(gx), 0.0f, _worldZ(gy));
     }
 
-    float mpp           = static_cast<float>(metersPerPixel(_lat, _zoom));
-    float unitsPerMeter = _worldHalfSize / (_subHalfPx * mpp);
+    const float mpp           = static_cast<float>(metersPerPixel(_lat, _zoom));
+    const float unitsPerMeter = (mpp > 1e-9f) ? kWorldPerPixel / mpp : 1.0f;
 
-    float up    = 700.0f * unitsPerMeter;
-    float south = 500.0f * unitsPerMeter;
+    const float up    = 700.0f * unitsPerMeter;
+    const float south = 500.0f * unitsPerMeter;
     _camera->setPosition(target + QVector3D(0.0f, up, south));
     _camera->setViewCenter(target);
     _camera->setUpVector(QVector3D(0.0f, 1.0f, 0.0f));

@@ -4,7 +4,10 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // LinkManager()
 // ─────────────────────────────────────────────────────────────────────────────
-LinkManager::LinkManager(QObject* parent) : QObject(parent) {}
+LinkManager::LinkManager(QObject* parent) : QObject(parent)
+{
+    qInfo("[init] LinkManager");
+}
 
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -14,6 +17,7 @@ LinkManager::LinkManager(QObject* parent) : QObject(parent) {}
 LinkManager::~LinkManager()
 {
     removeLink();
+    qInfo("[exit] LinkManager");
 }
 
 

@@ -3,6 +3,18 @@
 #include <QDebug>
 
 
+ConnectionBridge::ConnectionBridge(QObject* parent) : QObject(parent)
+{
+    qInfo("[init] ConnectionBridge");
+}
+
+
+ConnectionBridge::~ConnectionBridge()
+{
+    qInfo("[exit] ConnectionBridge");
+}
+
+
 void ConnectionBridge::connectUdp(const QString& host, int port)
 {
     qInfo("ConnectionBridge: connect requested %s:%d",

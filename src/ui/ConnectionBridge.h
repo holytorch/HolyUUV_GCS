@@ -29,7 +29,8 @@ class ConnectionBridge : public QObject {
     // 각 항목: { sysid, batteryRemaining, voltage, signalLevel }
     Q_PROPERTY(QVariantList  vehiclesInfo   READ vehiclesInfo    NOTIFY vehiclesInfoChanged)
 public:
-    explicit ConnectionBridge(QObject* parent = nullptr) : QObject(parent) {}
+    explicit ConnectionBridge(QObject* parent = nullptr);
+    ~ConnectionBridge() override;
 
     bool         connected()       const { return _connected; }
     QString      currentHost()     const { return _host; }

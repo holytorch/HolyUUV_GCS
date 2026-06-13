@@ -18,10 +18,12 @@ class TerrainScene;
 class MainWindow : public QMainWindow {
     Q_OBJECT
 public:
-    explicit MainWindow(VehicleState* state, QWidget* parent = nullptr);
+    explicit MainWindow(VehicleState* state, LogFeed* logFeed, QWidget* parent = nullptr);
+    ~MainWindow() override;
 
 public slots:
     void onGpsChanged();
+    void onDepthChanged();
 
 private:
     void _setupUi();

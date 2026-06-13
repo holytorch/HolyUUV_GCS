@@ -1,5 +1,6 @@
 #include "VehicleState.h"
 #include <QTimer>
+#include <QDebug>
 
 // ArduSub flight mode 번호 → 문자열 테이블
 // customMode 필드 값 기준 (ArduSub 4.x 기준)
@@ -36,6 +37,17 @@ VehicleState::VehicleState(QObject* parent) : QObject(parent)
         }
     });
     _watchdog->start();
+
+    qInfo("[init] VehicleState");
+}
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ~VehicleState()
+// ─────────────────────────────────────────────────────────────────────────────
+VehicleState::~VehicleState()
+{
+    qInfo("[exit] VehicleState");
 }
 
 

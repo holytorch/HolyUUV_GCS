@@ -30,8 +30,13 @@ class LogFeed : public QObject {
     Q_OBJECT
     Q_PROPERTY(QString text READ text NOTIFY textChanged)
 public:
-    explicit LogFeed(VehicleState* state, QObject* parent = nullptr);
+    explicit LogFeed(QObject* parent = nullptr);
     ~LogFeed() override;
+
+    // VehicleState 신호 연결은 생성 후 따로 바인딩한다. LogFeed를 부팅 가장 앞에서
+    // 먼저 만들어 메시지 핸들러로 전체 부팅 로그를 캡처하기 위함 (그 시점엔 아직
+    // VehicleState가 생성 전일 수 있음).
+    void bindVehicle(VehicleState* state);
 
     QString text() const { return _lines.join('\n'); }
 

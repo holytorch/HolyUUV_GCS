@@ -40,6 +40,7 @@ ENDIF()
 # ─────────────────────────────────────────────
 SET(SOURCES
     src/main.cpp
+    src/util/log/crash_handler.cpp
     src/application/Application.cpp
     src/comm/ILink.cpp
     src/vehicle/VehicleState.cpp
@@ -69,8 +70,15 @@ TARGET_INCLUDE_DIRECTORIES(${PROJECT_NAME} PRIVATE
     src/terrain
 )
 
-# MAVLink은 서드파티 헤더라 경고 억제
-TARGET_INCLUDE_DIRECTORIES(${PROJECT_NAME} SYSTEM PRIVATE
+# 엄격한 경고로 빌드 (코드 품질 점검)
+TARGET_COMPILE_OPTIONS(${PROJECT_NAME} PRIVATE
+    -Wall -Wextra -Wpedantic
+)
+
+# 크래시 핸들러 백트레이스에 함수명이 보이도록 동적 심볼 테이블 export
+TARGET_LINK_OPTIONS(${PROJECT_NAME} PRIVATE -rdynamic)
+
+TARGET_INCLUDE_DIRECTORIES(${PROJECT_NAME} PRIVATE
     ${MAVLINK_INCLUDE_DIR}
 )
 

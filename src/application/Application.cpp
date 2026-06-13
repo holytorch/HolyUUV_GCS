@@ -7,7 +7,12 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // Application()
 // ─────────────────────────────────────────────────────────────────────────────
-Application::Application(QObject* parent) : QObject(parent) {}
+Application::Application(QObject* parent) : QObject(parent)
+{
+    // LogFeed는 이미 생성(핸들러 설치)됐고, 이제 VehicleState도 준비됐으니
+    // 상태 전이(ARMED/MODE/GPS/BATTERY) 로그를 연결한다.
+    _logFeed.bindVehicle(&_vehicleState);
+}
 
 
 // ─────────────────────────────────────────────────────────────────────────────

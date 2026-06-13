@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//home/yoo/gcs_ws/qgroundcontrol-master/src/FlightMap/Images/**)"
+    ]
+  }
+}

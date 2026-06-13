@@ -29,7 +29,9 @@ TileCache::TileCache(const QString& dbPath, QObject* parent)
     connect(_worker, &TileCacheWorker::tileFound,  this, &TileCache::tileFound);
     connect(_worker, &TileCacheWorker::tileMissed, this, &TileCache::tileMissed);
 
+    qInfo("[init] TileCache");
     _thread->start();
+    qInfo("[init] TileCache.worker (thread)");
     emit _doInit(path);
 }
 
@@ -42,7 +44,9 @@ TileCache::~TileCache()
 {
     _thread->quit();
     _thread->wait();
+    qInfo("[exit] TileCache.worker (thread)");
     delete _worker;
+    qInfo("[exit] TileCache");
 }
 
 

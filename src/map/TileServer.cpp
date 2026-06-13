@@ -27,6 +27,16 @@ TileServer::TileServer(TileCache* cache, QObject* parent)
 {
     connect(_cache, &TileCache::tileFound,  this, &TileServer::onTileFound);
     connect(_cache, &TileCache::tileMissed, this, &TileServer::onTileMissed);
+    qInfo("[init] TileServer");
+}
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ~TileServer()
+// ─────────────────────────────────────────────────────────────────────────────
+TileServer::~TileServer()
+{
+    qInfo("[exit] TileServer");
 }
 
 

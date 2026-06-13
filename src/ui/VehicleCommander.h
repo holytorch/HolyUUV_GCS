@@ -15,7 +15,8 @@
 class VehicleCommander : public QObject {
     Q_OBJECT
 public:
-    explicit VehicleCommander(QObject* parent = nullptr) : QObject(parent) {}
+    explicit VehicleCommander(QObject* parent = nullptr);
+    ~VehicleCommander() override;
 
     Q_INVOKABLE void setArm(bool arm);
     // ArduSub 모드 이름. 인식하는 값: STABILIZE, ACRO, ALT_HOLD, AUTO, GUIDED,

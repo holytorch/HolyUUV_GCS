@@ -51,6 +51,7 @@ class VehicleState : public QObject {
 
 public:
     explicit VehicleState(QObject* parent = nullptr);
+    ~VehicleState() override;
 
     int    sysid()            const { return _sysid; }
     int    batteryRemaining() const { return _batteryRemaining; }

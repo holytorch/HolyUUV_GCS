@@ -4,6 +4,18 @@
 #include <QDebug>
 
 
+VehicleCommander::VehicleCommander(QObject* parent) : QObject(parent)
+{
+    qInfo("[init] VehicleCommander");
+}
+
+
+VehicleCommander::~VehicleCommander()
+{
+    qInfo("[exit] VehicleCommander");
+}
+
+
 void VehicleCommander::setArm(bool arm)
 {
     qInfo("Commander: %s requested", arm ? "ARM" : "DISARM");

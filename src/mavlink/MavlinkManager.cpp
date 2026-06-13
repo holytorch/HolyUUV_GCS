@@ -28,6 +28,17 @@ MavlinkManager::MavlinkManager(QObject* parent) : QObject(parent)
         LOG_INFO("Vehicle heartbeat timeout (5s) → disconnect");
         emit vehicleTimedOut();
     });
+
+    qInfo("[init] MavlinkManager");
+}
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ~MavlinkManager()
+// ─────────────────────────────────────────────────────────────────────────────
+MavlinkManager::~MavlinkManager()
+{
+    qInfo("[exit] MavlinkManager");
 }
 
 

@@ -223,13 +223,22 @@ Rectangle {
                 coordinate: QtPositioning.coordinate(
                     bridge ? bridge.latitude  : 0,
                     bridge ? bridge.longitude : 0)
-                anchorPoint.x: 8
-                anchorPoint.y: 8
-                sourceItem: Rectangle {
-                    width: 16; height: 16; radius: 8
-                    color: "#00e5ff"
-                    border.color: "white"
-                    border.width: 2
+                anchorPoint.x: subMarkerOsm.width  / 2
+                anchorPoint.y: subMarkerOsm.height / 2
+                // UUV 아이콘 — 차량 yaw(뱃머리 방향)로 회전. 조이스틱 yaw에 실시간 반응.
+                sourceItem: Image {
+                    id: subMarkerOsm
+                    source: "qrc:/assets/sub.png"
+                    width: 70; height: 70
+                    sourceSize.width: 140; sourceSize.height: 140
+                    fillMode: Image.PreserveAspectFit
+                    smooth: true; antialiasing: true; mipmap: true
+                    transform: Rotation {
+                        origin.x: subMarkerOsm.width  / 2
+                        origin.y: subMarkerOsm.height / 2
+                        // +90°: DAVE 시뮬의 yaw 프레임이 실제 이동방향보다 90° 반시계라 보정
+                        angle: vehicle ? vehicle.yaw * 180 / Math.PI + 90 : 0
+                    }
                 }
             }
         }
@@ -276,13 +285,22 @@ Rectangle {
                 coordinate: QtPositioning.coordinate(
                     bridge ? bridge.latitude  : 0,
                     bridge ? bridge.longitude : 0)
-                anchorPoint.x: 8
-                anchorPoint.y: 8
-                sourceItem: Rectangle {
-                    width: 16; height: 16; radius: 8
-                    color: "#00e5ff"
-                    border.color: "white"
-                    border.width: 2
+                anchorPoint.x: subMarkerVoyager.width  / 2
+                anchorPoint.y: subMarkerVoyager.height / 2
+                // UUV 아이콘 — 차량 yaw(뱃머리 방향)로 회전. 조이스틱 yaw에 실시간 반응.
+                sourceItem: Image {
+                    id: subMarkerVoyager
+                    source: "qrc:/assets/sub.png"
+                    width: 70; height: 70
+                    sourceSize.width: 140; sourceSize.height: 140
+                    fillMode: Image.PreserveAspectFit
+                    smooth: true; antialiasing: true; mipmap: true
+                    transform: Rotation {
+                        origin.x: subMarkerVoyager.width  / 2
+                        origin.y: subMarkerVoyager.height / 2
+                        // +90°: DAVE 시뮬의 yaw 프레임이 실제 이동방향보다 90° 반시계라 보정
+                        angle: vehicle ? vehicle.yaw * 180 / Math.PI + 90 : 0
+                    }
                 }
             }
         }

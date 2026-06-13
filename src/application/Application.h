@@ -4,6 +4,7 @@
 #include "comm/LinkManager.h"
 #include "mavlink/MavlinkManager.h"
 #include "vehicle/VehicleState.h"
+#include "ui/LogFeed.h"
 #include "ui/MainWindow.h"
 #include "map/TileCache.h"
 #include "map/TileServer.h"
@@ -40,11 +41,14 @@ public:
     void shutdown();
 
 private:
-    // Application이 생성될 때, 자동으로 같이 생성자 실행됨
+    // Application이 생성될 때, 자동으로 같이 생성자 실행됨.
+    // _logFeed를 가장 먼저 선언 → 가장 먼저 생성되어 메시지 핸들러를 설치하고,
+    // 이후 모든 객체의 [init]/[exit] 로그를 인앱 피드까지 캡처한다.
+    LogFeed        _logFeed;
     LinkManager    _linkManager;
     MavlinkManager _mavlinkManager;
     VehicleState   _vehicleState;
     TileCache      _tileCache;
     TileServer     _tileServer{&_tileCache};
-    MainWindow     _mainWindow{&_vehicleState};
+    MainWindow     _mainWindow{&_vehicleState, &_logFeed};
 };

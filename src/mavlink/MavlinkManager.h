@@ -78,6 +78,7 @@ class MavlinkManager : public QObject {
     Q_OBJECT
 public:
     explicit MavlinkManager(QObject* parent = nullptr);
+    ~MavlinkManager() override;
 
 public slots:
     void parseBytes(const QByteArray& data);

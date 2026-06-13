@@ -1,7 +1,9 @@
 #include <QApplication>
 #include <csignal>
+#include <cstdio>
 #include "application/Application.h"
 #include "util/log/logger.h"
+#include "util/log/crash_handler.h"
 #include "info/version.h"
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -15,6 +17,10 @@
 // ─────────────────────────────────────────────────────────────────────────────
 int main(int argc, char* argv[])
 {
+    // 크래시(SIGSEGV 등)·미처리 예외 발생 시 백트레이스를 안전하게 덤프.
+    // 무엇보다 먼저 설치해 이후 단계의 크래시도 잡히게 한다.
+    CrashHandler::install();
+
     // OpenGL 컨텍스트 공유 활성화 (2d, 3d 가 격리되지않고, 동일한 리소스 풀을 사용하도록)
     QApplication::setAttribute(Qt::AA_ShareOpenGLContexts);
 
@@ -45,11 +51,22 @@ int main(int argc, char* argv[])
     // Logger 초기화
     Logger::init();
 
-    qInfo("=== %s V%d.%d.%d ===",
-          HOLYUUV_GCS_NAME,
-          HOLYUUV_GCS_VERSION_MAJOR,
-          HOLYUUV_GCS_VERSION_MINOR,
-          HOLYUUV_GCS_VERSION_PATCH);
+    // 시작 배너 — 로그 패턴([time][type])을 거치지 않도록 stderr에 직접 출력.
+    // (이후의 [init] 로그들이 이 배너 아래로 이어진다)
+    std::fputs(
+        "\n"
+        "  ██╗  ██╗ ██████╗ ██╗     ██╗   ██╗██╗   ██╗██╗   ██╗██╗   ██╗\n"
+        "  ██║  ██║██╔═══██╗██║     ╚██╗ ██╔╝██║   ██║██║   ██║██║   ██║\n"
+        "  ███████║██║   ██║██║      ╚████╔╝ ██║   ██║██║   ██║██║   ██║\n"
+        "  ██╔══██║██║   ██║██║       ╚██╔╝  ██║   ██║██║   ██║╚██╗ ██╔╝\n"
+        "  ██║  ██║╚██████╔╝███████╗   ██║   ╚██████╔╝╚██████╔╝ ╚████╔╝ \n"
+        "  ╚═╝  ╚═╝ ╚═════╝ ╚══════╝   ╚═╝    ╚═════╝  ╚═════╝   ╚═══╝  \n",
+        stderr);
+    std::fprintf(stderr,
+        "\n          Ground Control Station   ·   v%d.%d.%d\n\n",
+        HOLYUUV_GCS_VERSION_MAJOR,
+        HOLYUUV_GCS_VERSION_MINOR,
+        HOLYUUV_GCS_VERSION_PATCH);
 
     // Application 스택 메모리 객체 생성 및 초기화
     Application app;
