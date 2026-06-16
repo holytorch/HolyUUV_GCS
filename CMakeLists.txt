@@ -44,6 +44,7 @@ SET(SOURCES
     src/application/Application.cpp
     src/comm/ILink.cpp
     src/vehicle/VehicleState.cpp
+    src/vehicle/VehicleManager.cpp
     src/ui/MainWindow.cpp
     src/comm/LinkManager.cpp
     src/comm/UdpLink.cpp

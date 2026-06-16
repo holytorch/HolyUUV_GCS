@@ -98,6 +98,7 @@ void MavlinkManager::parseBytes(const QByteArray& data)
                     // 활성 차량의 HEARTBEAT만 VehicleState로 전달.
                     if (fromSysid == _activeSysid && _message.compid == _targetCompid) {
                         MavlinkHeartbeat out;
+                        out.sysid        = fromSysid;
                         out.type         = hb.type;
                         out.autopilot    = hb.autopilot;
                         out.baseMode     = hb.base_mode;
@@ -113,6 +114,7 @@ void MavlinkManager::parseBytes(const QByteArray& data)
                     mavlink_attitude_t att;
                     mavlink_msg_attitude_decode(&_message, &att);
                     MavlinkAttitude out;
+                    out.sysid      = _message.sysid;
                     out.roll       = att.roll;
                     out.pitch      = att.pitch;
                     out.yaw        = att.yaw;
@@ -136,6 +138,7 @@ void MavlinkManager::parseBytes(const QByteArray& data)
                     // 활성 차량만 VehicleState로 (컨트롤 센터 표시용)
                     if (_message.sysid == _activeSysid) {
                         MavlinkSysStatus out;
+                        out.sysid            = _message.sysid;
                         out.voltageBattery   = sys.voltage_battery;
                         out.currentBattery   = sys.current_battery;
                         out.batteryRemaining = sys.battery_remaining;
@@ -165,6 +168,7 @@ void MavlinkManager::parseBytes(const QByteArray& data)
                     mavlink_vfr_hud_t hud;
                     mavlink_msg_vfr_hud_decode(&_message, &hud);
                     MavlinkVfrHud out;
+                    out.sysid       = _message.sysid;
                     out.groundspeed = hud.groundspeed;
                     out.altitude    = hud.alt;
                     out.heading     = static_cast<float>(hud.heading);
@@ -178,6 +182,7 @@ void MavlinkManager::parseBytes(const QByteArray& data)
                     mavlink_global_position_int_t pos;
                     mavlink_msg_global_position_int_decode(&_message, &pos);
                     MavlinkGlobalPosition out;
+                    out.sysid       = _message.sysid;
                     out.lat         = pos.lat / 1e7;
                     out.lon         = pos.lon / 1e7;
                     out.alt         = pos.alt / 1000.0f;
@@ -206,6 +211,7 @@ void MavlinkManager::parseBytes(const QByteArray& data)
                     mavlink_gps_raw_int_t gps;
                     mavlink_msg_gps_raw_int_decode(&_message, &gps);
                     MavlinkGpsRaw out;
+                    out.sysid    = _message.sysid;
                     out.satCount = gps.satellites_visible;
                     out.hdop     = gps.eph / 100.0f;
                     emit gpsRawReceived(out);

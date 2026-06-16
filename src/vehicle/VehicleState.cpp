@@ -42,6 +42,14 @@ VehicleState::VehicleState(QObject* parent) : QObject(parent)
 }
 
 
+// sysid를 생성 시 바인딩. 기본 생성자에 위임해 watchdog 설정을 재사용한다.
+VehicleState::VehicleState(int sysid, QObject* parent)
+    : VehicleState(parent)
+{
+    _sysid = sysid;
+}
+
+
 // ─────────────────────────────────────────────────────────────────────────────
 // ~VehicleState()
 // ─────────────────────────────────────────────────────────────────────────────

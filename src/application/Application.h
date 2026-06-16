@@ -4,6 +4,7 @@
 #include "comm/LinkManager.h"
 #include "mavlink/MavlinkManager.h"
 #include "vehicle/VehicleState.h"
+#include "vehicle/VehicleManager.h"
 #include "ui/LogFeed.h"
 #include "ui/MainWindow.h"
 #include "map/TileCache.h"
@@ -48,6 +49,8 @@ private:
     LinkManager    _linkManager;
     MavlinkManager _mavlinkManager;
     VehicleState   _vehicleState;
+    // 다중로봇 단일 진실원천 (마이그레이션 중 _vehicleState와 병렬로 도입; 라우팅은 다음 단계)
+    VehicleManager _vehicleManager;
     TileCache      _tileCache;
     TileServer     _tileServer{&_tileCache};
     MainWindow     _mainWindow{&_vehicleState, &_logFeed};

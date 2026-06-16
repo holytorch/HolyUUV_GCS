@@ -35,6 +35,10 @@ if [ ! -f "linuxdeploy-plugin-qt" ]; then
     chmod +x linuxdeploy-plugin-qt
 fi
 
+# ── 이전 산출물 정리 ──────────────────────────
+# 옛 AppImage가 남아 있으면 새 빌드와 헷갈려 옛 걸 실행하게 된다(최신화 안 됨).
+rm -f HolyUUV_GCS*.AppImage
+
 # ── AppDir 구성 ───────────────────────────────
 echo "[2/4] Setting up AppDir..."
 APPDIR="AppDir"

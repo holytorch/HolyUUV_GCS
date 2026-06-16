@@ -16,7 +16,10 @@
 // C MAVLink 라이브러리 구조체를 Qt 타입으로 감싸서 시그널/슬롯에서 사용한다.
 // ─────────────────────────────────────────────────────────────────────────────
 
+// 다중로봇: 모든 텔레메트리 구조체에 source sysid를 실어 소비자(VehicleManager)가
+// 어느 차량의 데이터인지 구분할 수 있게 한다. (RadioStatus는 모뎀 레벨이라 제외)
 struct MavlinkHeartbeat {
+    int      sysid         = 0;
     uint8_t  type          = 0;
     uint8_t  autopilot     = 0;
     uint8_t  baseMode      = 0;
@@ -25,6 +28,7 @@ struct MavlinkHeartbeat {
 };
 
 struct MavlinkAttitude {
+    int   sysid      = 0;
     float roll       = 0.0f;  // rad
     float pitch      = 0.0f;  // rad
     float yaw        = 0.0f;  // rad
@@ -34,6 +38,7 @@ struct MavlinkAttitude {
 };
 
 struct MavlinkSysStatus {
+    int      sysid            = 0;
     uint16_t voltageBattery   = 0;    // mV
     int16_t  currentBattery   = -1;   // cA (-1 = 사용 불가)
     int8_t   batteryRemaining = -1;   // % (-1 = 사용 불가)
@@ -50,6 +55,7 @@ struct MavlinkRadioStatus {
 };
 
 struct MavlinkVfrHud {
+    int   sysid       = 0;
     float groundspeed = 0.0f;  // m/s
     float altitude    = 0.0f;  // m (수중 로봇은 음수 = 수심)
     float heading     = 0.0f;  // deg
@@ -57,6 +63,7 @@ struct MavlinkVfrHud {
 };
 
 struct MavlinkGlobalPosition {
+    int    sysid       = 0;
     double lat         = 0.0;  // deg
     double lon         = 0.0;  // deg
     float  alt         = 0.0f; // m
@@ -64,6 +71,7 @@ struct MavlinkGlobalPosition {
 };
 
 struct MavlinkGpsRaw {
+    int   sysid    = 0;
     int   satCount = 0;
     float hdop     = 99.9f;
 };

@@ -51,6 +51,9 @@ class VehicleState : public QObject {
 
 public:
     explicit VehicleState(QObject* parent = nullptr);
+    // 다중로봇: 로봇 1대당 객체 1개. sysid는 생성 시 고정되고, 연결 해제/타임아웃 시
+    // 이 객체째로 삭제된다 (객체 수명 = 로봇 존재 기간). 번호를 갈아끼우지 않음.
+    explicit VehicleState(int sysid, QObject* parent = nullptr);
     ~VehicleState() override;
 
     int    sysid()            const { return _sysid; }
