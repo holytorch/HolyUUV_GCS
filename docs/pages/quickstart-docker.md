@@ -149,8 +149,8 @@ echo "Host IP: $HOST_IP"
 ping -c 3 $HOST_IP
 ```
 
-If the ping succeeds, MAVLink traffic on that IP and port (e.g. `14555`) will reach the GCS.
-Set the connection in the app to `$HOST_IP:14555` instead of `127.0.0.1:14555`.
+If the ping succeeds, MAVLink traffic on that IP and port (e.g. `14550`) will reach the GCS.
+Set the connection in the app to `$HOST_IP:14550` instead of `127.0.0.1:14550`.
 
 {: .note }
 > Alternatively, launch the container with `--network=host` to share the host network directly —

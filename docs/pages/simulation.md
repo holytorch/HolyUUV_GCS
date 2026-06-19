@@ -1,7 +1,8 @@
 ---
 title: GCS + Simulator
 layout: default
-nav_order: 4
+parent: Gazebo Simulation Guide
+nav_order: 1
 ---
 
 # GCS + Simulator
@@ -25,6 +26,13 @@ HolyUUV GCS was developed and validated using **Gazebo** simulation via
 robotics simulation environment built on top of Gazebo and ROS. DAVE streams the vehicle's
 telemetry over **MAVLink (UDP)**, which the GCS connects to just like a real vehicle.
 
+![Comms chain: flight controller to companion computer (MAVROS) to remote GCS]({{ '/assets/images/comms-architecture.svg' | relative_url }})
+
+On a real vehicle the **flight controller** talks to an onboard **companion computer** (running
+**MAVROS**) over a serial/UART link (`fcu_url`), and the companion relays MAVLink on to the **remote
+GCS** over UDP (`gcs_url`, port `14550`). In simulation, ArduSub SITL plays the flight controller and
+everything runs on one host — the GCS connects exactly the same way.
+
 There are two parts:
 
 1. **Set up Project DAVE** — native on your host, or in Docker.
@@ -46,22 +54,27 @@ and the supported system requirements:
 [**Project DAVE Installation (Notion)**](https://dave-ros2.notion.site/?v=d54cc8422868455888cc629d8e6117a9&p=fcc36eee94cb4c76a0b06f71d17bb360&pm=s)
 
 {: .note }
-> Make sure the simulator's MAVLink endpoint listens on **`0.0.0.0:14555`** (all interfaces),
+> Make sure the simulator's MAVLink endpoint listens on **`0.0.0.0:14550`** (all interfaces),
 > not only `127.0.0.1`. Otherwise it won't be reachable from another machine or container.
 
 ---
 
 ## 2. Which address do I use in the GCS?
 
-The GCS connects to a MAVLink endpoint as `host:port` (default port **`14555`**). The right
+The GCS connects to a MAVLink endpoint as `host:port` (default port **`14550`**). The right
 **host** depends on where DAVE and the GCS each run:
 
 | DAVE runs on | GCS runs on | Connect the GCS to |
 |--------------|-------------|--------------------|
-| Host (native) | Host (native) | `127.0.0.1:14555` |
-| Host (native) | Docker | host gateway IP, e.g. `172.17.0.1:14555` — see [Quick Start (Docker)]({% link pages/quickstart-docker.md %}) |
-| Docker | Host (native) | publish the port (`-p 14555:14555/udp`) → `127.0.0.1:14555` |
-| **Docker** | **Docker** | put both on one Docker network → `dave:14555` (DAVE's container name) — see below |
+| Host (native) | Host (native) | `127.0.0.1:14550` |
+| Host (native) | Docker | host gateway IP, e.g. `172.17.0.1:14550` — see [Quick Start (Docker)]({% link pages/quickstart-docker.md %}) |
+| Docker | Host (native) | **✅ Recommended** — publish the port (`-p 14550:14550/udp`) → `127.0.0.1:14550` |
+| **Docker** | **Docker** | put both on one Docker network → `dave:14550` (DAVE's container name) — see below |
+
+{: .note }
+> **Recommended:** run **DAVE in Docker** and the **GCS natively on the host** (the AppImage),
+> publishing UDP `14550` (`-p 14550:14550/udp`) so `127.0.0.1:14550` just works. This is the
+> setup HolyUUV GCS is developed and tested against.
 
 Anything where one side is **native and the other is in Docker** is already covered by the
 [Quick Start (Docker)]({% link pages/quickstart-docker.md %}) page (X11 with `xhost +local:docker`,
@@ -94,7 +107,7 @@ docker run -it --rm --network simnet \
 ```
 
 Inside the GCS container, install `libfuse2t64`, run the AppImage, and in the app connect to
-**`dave:14555`** — the container name `dave` resolves to its IP on `simnet`.
+**`dave:14550`** — the container name `dave` resolves to its IP on `simnet`.
 
 ### Cleaner way — docker-compose
 
@@ -130,11 +143,11 @@ xhost +local:docker     # let the containers open windows on your screen
 docker compose up
 ```
 
-In the GCS, connect to **`dave:14555`** (the service name).
+In the GCS, connect to **`dave:14550`** (the service name).
 
 {: .note }
 > Prefer not to deal with container networking? Run **both** containers with `--network host`
-> (or `network_mode: host` in compose) — then `127.0.0.1:14555` works as-is, at the cost of
+> (or `network_mode: host` in compose) — then `127.0.0.1:14550` works as-is, at the cost of
 > network isolation.
 
 ---
@@ -177,7 +190,7 @@ Once ArduSub is up and streaming MAVLink, follow these steps in the GCS:
 
    ![Step 2]({{ '/assets/images/2.png' | relative_url }})
 
-3. Choose **UDP**, set **Host** `127.0.0.1` and **Port** `14555` (the defaults), then **Add**.
+3. Choose **UDP**, set **Host** `127.0.0.1` and **Port** `14550` (the defaults), then **Add**.
    - For a remote vehicle or Docker setup, use the appropriate IP and port from the table in section 2 instead.
 
    ![Step 3]({{ '/assets/images/3.png' | relative_url }})

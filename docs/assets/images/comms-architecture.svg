@@ -1,0 +1,43 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 210" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif">
+  <defs>
+    <marker id="arrow" markerWidth="9" markerHeight="9" refX="7.5" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L8,3 L0,6 Z" fill="#5fbfd6"/>
+    </marker>
+  </defs>
+
+  <!-- ── Box 1: Underwater Robot ── -->
+  <rect x="20"  y="55" width="230" height="120" rx="10" fill="#16212b" stroke="#2f4250" stroke-width="1.5"/>
+  <text x="135" y="80"  text-anchor="middle" fill="#8faabc" font-size="13" font-weight="700">Underwater Robot</text>
+  <rect x="38"  y="95" width="194" height="62" rx="8" fill="#0e1822" stroke="#3a5566" stroke-width="1.5"/>
+  <text x="135" y="122" text-anchor="middle" fill="#e6eef0" font-size="15" font-weight="700">Flight Controller</text>
+  <text x="135" y="142" text-anchor="middle" fill="#8aa0ad" font-size="11">ArduSub (autopilot)</text>
+
+  <!-- ── Box 2: Companion Computer ── -->
+  <rect x="385" y="55" width="230" height="120" rx="10" fill="#16212b" stroke="#2f4250" stroke-width="1.5"/>
+  <text x="500" y="80"  text-anchor="middle" fill="#8faabc" font-size="13" font-weight="700">Companion Computer</text>
+  <rect x="403" y="95" width="194" height="62" rx="8" fill="#0e1822" stroke="#3a5566" stroke-width="1.5"/>
+  <text x="500" y="122" text-anchor="middle" fill="#e6eef0" font-size="15" font-weight="700">MAVROS</text>
+  <text x="500" y="142" text-anchor="middle" fill="#8aa0ad" font-size="11">ROS &#8596; MAVLink bridge</text>
+
+  <!-- ── Box 3: Remote GCS ── -->
+  <rect x="750" y="55" width="230" height="120" rx="10" fill="#16212b" stroke="#2f4250" stroke-width="1.5"/>
+  <text x="865" y="80"  text-anchor="middle" fill="#8faabc" font-size="13" font-weight="700">Remote GCS</text>
+  <rect x="768" y="95" width="194" height="62" rx="8" fill="#0e1822" stroke="#3a5566" stroke-width="1.5"/>
+  <text x="865" y="122" text-anchor="middle" fill="#e6eef0" font-size="15" font-weight="700">HolyUUV GCS</text>
+  <text x="865" y="142" text-anchor="middle" fill="#8aa0ad" font-size="11">ground station</text>
+
+  <!-- ── Link 1: FC ↔ Companion ── -->
+  <line x1="250" y1="125" x2="385" y2="125" stroke="#5fbfd6" stroke-width="2" marker-start="url(#arrow)" marker-end="url(#arrow)"/>
+  <text x="317" y="112" text-anchor="middle" fill="#9fb6c4" font-size="11" font-weight="600">MAVLink &#183; fcu_url</text>
+  <text x="317" y="148" text-anchor="middle" fill="#6b8290" font-size="9.5">serial / UART</text>
+
+  <!-- ── Link 2: Companion ↔ GCS ── -->
+  <line x1="615" y1="125" x2="750" y2="125" stroke="#5fbfd6" stroke-width="2" marker-start="url(#arrow)" marker-end="url(#arrow)"/>
+  <text x="682" y="112" text-anchor="middle" fill="#9fb6c4" font-size="11" font-weight="600">MAVLink &#183; gcs_url</text>
+  <text x="682" y="148" text-anchor="middle" fill="#6b8290" font-size="9.5">UDP :14550 &#183; Wi-Fi / tether</text>
+
+  <!-- ── captions ── -->
+  <text x="135" y="197" text-anchor="middle" fill="#6b8290" font-size="10">onboard the vehicle</text>
+  <text x="500" y="197" text-anchor="middle" fill="#6b8290" font-size="10">onboard the vehicle</text>
+  <text x="865" y="197" text-anchor="middle" fill="#6b8290" font-size="10">operator side</text>
+</svg>

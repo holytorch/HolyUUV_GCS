@@ -1,7 +1,8 @@
 ---
 title: Joystick & control
 layout: default
-nav_order: 6
+parent: Gazebo Simulation Guide
+nav_order: 2
 ---
 
 # Joystick & control
@@ -17,6 +18,15 @@ Drive the vehicle with the on-screen sticks, arm it, and switch flight modes.
 {:toc}
 
 ---
+
+![Select a vehicle in the VEHICLES panel]({{ '/assets/images/6.png' | relative_url }})
+
+![Press ARM in the Control Center]({{ '/assets/images/7.png' | relative_url }})
+
+## Using the simulator?
+
+Connect to it first, then click the robot in the **VEHICLES** panel and press **ARM** — now you
+can pilot it with the sticks below.
 
 ## The two sticks
 
