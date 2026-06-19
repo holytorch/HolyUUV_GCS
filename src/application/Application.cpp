@@ -9,9 +9,11 @@
 // ─────────────────────────────────────────────────────────────────────────────
 Application::Application(QObject* parent) : QObject(parent)
 {
-    // LogFeed는 이미 생성(핸들러 설치)됐고, 이제 VehicleState도 준비됐으니
-    // 상태 전이(ARMED/MODE/GPS/BATTERY) 로그를 연결한다.
-    _logFeed.bindVehicle(&_vehicleState);
+    // LogFeed는 활성 차량의 상태 전이(ARMED/MODE/GPS/BATTERY)를 따라 로그한다.
+    // 활성 차량이 바뀌면 그쪽으로 재바인딩 (rebind 시 LogFeed가 이전 연결을 해제).
+    connect(&_vehicleManager, &VehicleManager::activeVehicleChanged, this, [this]() {
+        _logFeed.bindVehicle(_vehicleManager.activeVehicle());
+    });
 }
 
 
@@ -47,53 +49,56 @@ bool Application::initialize()
     connect(&_linkManager, &LinkManager::bytesReceived,
             &_mavlinkManager, &MavlinkManager::parseBytes);
 
-    // MavlinkManager → VehicleState 업데이트 파이프라인
+    // MavlinkManager → VehicleManager 업데이트 파이프라인 (sysid로 차량별 분배)
     connect(&_mavlinkManager, &MavlinkManager::sysStatusReceived,
             [this](const MavlinkSysStatus& s) {
-        _vehicleState.updateBattery(s.batteryRemaining,
-                                    s.voltageBattery / 1000.0f,
-                                    s.currentBattery,
-                                    s.dropRateComm,
-                                    s.errorsComm);
+        _vehicleManager.getOrCreate(s.sysid)->updateBattery(
+            s.batteryRemaining, s.voltageBattery / 1000.0f,
+            s.currentBattery, s.dropRateComm, s.errorsComm);
     });
     connect(&_mavlinkManager, &MavlinkManager::radioStatusReceived,
             [this](const MavlinkRadioStatus& r) {
-        _vehicleState.updateRadioStatus(r.rssi, r.remRssi);
+        // RADIO_STATUS는 링크(모뎀) 레벨 — 활성 차량에만 표시 반영
+        if (auto* v = _vehicleManager.activeVehicle())
+            v->updateRadioStatus(r.rssi, r.remRssi);
     });
     connect(&_mavlinkManager, &MavlinkManager::attitudeReceived,
             [this](const MavlinkAttitude& a) {
-        _vehicleState.updateAttitude(a.roll, a.pitch, a.yaw);
+        _vehicleManager.getOrCreate(a.sysid)->updateAttitude(a.roll, a.pitch, a.yaw);
     });
     connect(&_mavlinkManager, &MavlinkManager::vfrHudReceived,
             [this](const MavlinkVfrHud& h) {
-        _vehicleState.updateVfrHud(h.groundspeed, h.altitude, h.heading, h.throttle);
+        _vehicleManager.getOrCreate(h.sysid)->updateVfrHud(
+            h.groundspeed, h.altitude, h.heading, h.throttle);
     });
     connect(&_mavlinkManager, &MavlinkManager::globalPositionReceived,
             [this](const MavlinkGlobalPosition& p) {
-        _vehicleState.updateGlobalPosition(p.lat, p.lon);
+        _vehicleManager.getOrCreate(p.sysid)->updateGlobalPosition(p.lat, p.lon);
     });
     connect(&_mavlinkManager, &MavlinkManager::gpsRawReceived,
             [this](const MavlinkGpsRaw& g) {
-        _vehicleState.updateGpsRaw(g.satCount, g.hdop);
+        _vehicleManager.getOrCreate(g.sysid)->updateGpsRaw(g.satCount, g.hdop);
     });
     connect(&_mavlinkManager, &MavlinkManager::heartbeatReceived,
             [this](const MavlinkHeartbeat& hb) {
         const bool armed = (hb.baseMode & 0x80) != 0;
-        _vehicleState.updateHeartbeat(armed, hb.customMode);
+        _vehicleManager.getOrCreate(hb.sysid)->updateHeartbeat(armed, hb.customMode);
     });
 
-    // 활성 sysid 변경 → VehicleState에 sysid 반영 + telemetry 리셋 (stale 표시 방지)
-    connect(&_mavlinkManager, &MavlinkManager::activeSysidChanged,
-            [this](int sysid) {
-        _vehicleState.resetTelemetry();
-        _vehicleState.setSysid(sysid);
+    // 활성 차량 권위 = VehicleManager. 활성이 바뀌면(사용자 클릭이든 타임아웃 자동
+    // 재선택이든) 명령/heartbeat target(Mavlink)과 UI 하이라이트(ConnBridge)가 따라간다.
+    connect(&_vehicleManager, &VehicleManager::activeVehicleChanged, this,
+            [this]() {
+        const int sysid = _vehicleManager.activeSysid();
+        _mavlinkManager.setActiveSysid(sysid);   // 명령 target + compid 해석
         if (auto* conn = _mainWindow.connection())
-            conn->setActiveSysidMirror(sysid);
+            conn->setActiveSysidMirror(sysid);   // 카드 하이라이트
     });
 
-    // 새 sysid 감지 → ConnectionBridge 미러 (QML 트리에 추가)
+    // 새 sysid 감지 → 차량 객체 미리 생성 + ConnectionBridge 미러 (QML 트리에 추가)
     connect(&_mavlinkManager, &MavlinkManager::sysidDetected,
             [this](int sysid) {
+        _vehicleManager.getOrCreate(sysid);
         if (auto* conn = _mainWindow.connection())
             conn->addDetectedSysid(sysid);
     });
@@ -113,9 +118,13 @@ bool Application::initialize()
             &_mavlinkManager, &MavlinkManager::startHeartbeat);
     connect(&_linkManager, &LinkManager::linkDisconnected,
             &_mavlinkManager, &MavlinkManager::stopHeartbeat);
-    // 차량 5초 무응답 → 자동 disconnect
+    // 특정 차량 HEARTBEAT 끊김 → 그 차량만 제거 (링크는 유지, 다른 차량 영향 없음)
     connect(&_mavlinkManager, &MavlinkManager::vehicleTimedOut,
-            [this]() { _linkManager.removeLink(); });
+            [this](int sysid) {
+        _vehicleManager.removeVehicle(sysid);
+        if (auto* conn = _mainWindow.connection())
+            conn->removeDetectedSysid(sysid);
+    });
 
     // QML 컨트롤센터 버튼/조이스틱 → MAVLink 송신
     if (auto* cmd = _mainWindow.commander()) {
@@ -135,7 +144,7 @@ bool Application::initialize()
             UdpConfig cfg;
             cfg.remoteHost = host;
             cfg.remotePort = port;
-            cfg.localPort  = 0;   // OS가 빈 포트 자동 할당
+            cfg.localPort  = port;   // QGC 방식: 이 포트에 바인딩해 모든 로봇의 push 수신
             _linkManager.setLink(std::make_unique<UdpLink>(cfg));
         });
         connect(conn, &ConnectionBridge::disconnectRequested,
@@ -148,15 +157,15 @@ bool Application::initialize()
                 [conn, this]() {
             conn->setConnected(false);
             conn->clearDetectedSysids();
-            // 연결 해제 시 mavlink sysid latch + vehicle telemetry 초기화
+            // 연결 해제 시 mavlink sysid latch 초기화 + 모든 차량 제거
             _mavlinkManager.resetVehicleLatch();
-            _vehicleState.resetTelemetry();
-            _vehicleState.setSysid(0);
+            _vehicleManager.clear();
         });
 
-        // QML이 sysid 클릭 → MavlinkManager에 active 변경 요청
+        // QML이 sysid 클릭 → VehicleManager(활성 권위)에 변경 요청.
+        // VM이 activeVehicleChanged를 쏘면 위 람다가 Mavlink target/하이라이트를 동기화.
         connect(conn, &ConnectionBridge::activeSysidChangeRequested,
-                &_mavlinkManager, &MavlinkManager::setActiveSysid);
+                &_vehicleManager, &VehicleManager::setActiveSysid);
     }
 
     _mainWindow.show();

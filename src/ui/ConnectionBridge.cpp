@@ -60,6 +60,18 @@ void ConnectionBridge::addDetectedSysid(int sysid)
 }
 
 
+void ConnectionBridge::removeDetectedSysid(int sysid)
+{
+    const int before = _detectedSysids.size();
+    _detectedSysids.removeAll(QVariant(sysid));
+    const bool slotRemoved = (_slots.remove(sysid) > 0);
+    if (_detectedSysids.size() != before || slotRemoved) {
+        emit detectedSysidsChanged();
+        emit vehiclesInfoChanged();
+    }
+}
+
+
 void ConnectionBridge::clearDetectedSysids()
 {
     if (_detectedSysids.isEmpty() && _slots.isEmpty()) return;

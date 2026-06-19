@@ -58,7 +58,11 @@ signals:
     void countChanged();
 
 private:
+    // 사용자가 카드를 누르기 전까지는 가장 낮은 sysid(보통 1번)를 기본 활성으로 둔다.
+    void _applyDefaultActive();
+
     QHash<int, VehicleState*> _vehicles;   // 소유 (QObject child)
     QList<int>                _order;       // 행 순서 안정화 (delegate dangling 방지)
     int                       _activeSysid = 0;
+    bool                      _userPicked  = false;   // 사용자가 직접 활성 차량을 골랐는지
 };

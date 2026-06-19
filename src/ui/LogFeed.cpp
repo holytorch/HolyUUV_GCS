@@ -22,9 +22,14 @@ LogFeed::LogFeed(QObject* parent)
 }
 
 
-// VehicleState가 생성된 뒤(Application 생성자) 호출되어 상태 전이 로그를 연결한다.
+// 활성 차량의 상태 전이 로그를 연결한다. 다중로봇에서 활성 차량이 바뀌면
+// 다시 호출되며, 이전 차량의 시그널 연결을 먼저 해제(네트워크 아님 — 시그널/슬롯만)한다.
 void LogFeed::bindVehicle(VehicleState* state)
 {
+    if (_state == state) return;
+    if (_state)
+        disconnect(_state, nullptr, this, nullptr);   // 이전 차량 시그널 듣기 중단
+
     _state = state;
     if (!_state) return;
 

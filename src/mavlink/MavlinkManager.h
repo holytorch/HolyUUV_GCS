@@ -4,7 +4,9 @@
 #include <QByteArray>
 #include <QSet>
 #include <QMap>
+#include <QHash>
 #include <QTimer>
+#include <QElapsedTimer>
 #include <cstdint>
 
 #ifdef MAVLINK_AVAILABLE
@@ -117,12 +119,15 @@ signals:
     void sysidDetected(int sysid);
     // 활성 sysid 변경 (외부 setActiveSysid 또는 첫 자동 latch). HUD 리셋 트리거.
     void activeSysidChanged(int sysid);
-    // 차량 HEARTBEAT가 5초 이상 수신되지 않으면 발신 → 자동 disconnect.
-    void vehicleTimedOut();
+    // 특정 차량(sysid)의 HEARTBEAT가 일정 시간 끊기면 발신 → 그 차량만 제거(링크 유지).
+    void vehicleTimedOut(int sysid);
     // 모든 sysid의 SYS_STATUS — 카드 슬롯 갱신용 (활성 필터 없음).
     void anyVehicleSysStatus(int sysid, int batteryRemaining, float voltage);
 
 private:
+    // per-vehicle 워치독: 각 sysid의 마지막 HEARTBEAT 시각을 주기적으로 점검.
+    void _sweepVehicles();
+
 #ifdef MAVLINK_AVAILABLE
     // 송신용 공통 헬퍼 — to_send_buffer + bytesToSend.
     void _emitMessage(mavlink_message_t& msg);
@@ -146,6 +151,9 @@ private:
 
     // GCS HEARTBEAT 1Hz 타이머 (ArduSub에게 GCS 존재 알림)
     QTimer* _gcsHeartbeatTimer  = nullptr;
-    // 차량 HEARTBEAT 수신 watchdog — 5초 단발 타이머
-    QTimer* _vehicleWatchdog    = nullptr;
+
+    // per-vehicle 워치독: 주기 스윕 타이머 + sysid별 마지막 HEARTBEAT 시각(ms).
+    QTimer*            _vehicleSweep = nullptr;
+    QElapsedTimer      _uptime;                 // 단조 증가 기준 시계
+    QHash<int, qint64> _lastSeen;               // sysid → 마지막 HEARTBEAT 시각(ms)
 };

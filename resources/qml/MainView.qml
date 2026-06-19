@@ -218,26 +218,30 @@ Rectangle {
                 function onMapZoomChanged()   { if (osmMap.zoomLevel !== mapZoom) osmMap.zoomLevel = mapZoom }
             }
 
-            MapQuickItem {
-                visible: bridge ? bridge.hasPosition : false
-                coordinate: QtPositioning.coordinate(
-                    bridge ? bridge.latitude  : 0,
-                    bridge ? bridge.longitude : 0)
-                anchorPoint.x: subMarkerOsm.width  / 2
-                anchorPoint.y: subMarkerOsm.height / 2
-                // UUV 아이콘 — 차량 yaw(뱃머리 방향)로 회전. 조이스틱 yaw에 실시간 반응.
-                sourceItem: Image {
-                    id: subMarkerOsm
-                    source: "qrc:/assets/sub.png"
-                    width: 70; height: 70
-                    sourceSize.width: 140; sourceSize.height: 140
-                    fillMode: Image.PreserveAspectFit
-                    smooth: true; antialiasing: true; mipmap: true
-                    transform: Rotation {
-                        origin.x: subMarkerOsm.width  / 2
-                        origin.y: subMarkerOsm.height / 2
-                        // +90°: DAVE 시뮬의 yaw 프레임이 실제 이동방향보다 90° 반시계라 보정
-                        angle: vehicle ? vehicle.yaw * 180 / Math.PI + 90 : 0
+            // 다중로봇: 감지된 모든 차량을 마커로 표시. 활성(선택) 차량만 불투명, 나머지는 흐리게.
+            MapItemView {
+                model: vehicleManager
+                delegate: MapQuickItem {
+                    visible: model.vehicle && (model.vehicle.latitude !== 0 || model.vehicle.longitude !== 0)
+                    coordinate: QtPositioning.coordinate(
+                        model.vehicle ? model.vehicle.latitude  : 0,
+                        model.vehicle ? model.vehicle.longitude : 0)
+                    anchorPoint.x: markerImgOsm.width  / 2
+                    anchorPoint.y: markerImgOsm.height / 2
+                    sourceItem: Image {
+                        id: markerImgOsm
+                        source: "qrc:/assets/sub.png"
+                        width: 70; height: 70
+                        sourceSize.width: 140; sourceSize.height: 140
+                        fillMode: Image.PreserveAspectFit
+                        smooth: true; antialiasing: true; mipmap: true
+                        opacity: (vehicleManager && model.sysid === vehicleManager.activeSysid) ? 1.0 : 0.45
+                        transform: Rotation {
+                            origin.x: markerImgOsm.width  / 2
+                            origin.y: markerImgOsm.height / 2
+                            // +90°: DAVE yaw 프레임 보정
+                            angle: model.vehicle ? model.vehicle.yaw * 180 / Math.PI + 90 : 0
+                        }
                     }
                 }
             }
@@ -280,26 +284,30 @@ Rectangle {
                 function onMapZoomChanged()   { if (voyagerMap.zoomLevel !== mapZoom) voyagerMap.zoomLevel = mapZoom }
             }
 
-            MapQuickItem {
-                visible: bridge ? bridge.hasPosition : false
-                coordinate: QtPositioning.coordinate(
-                    bridge ? bridge.latitude  : 0,
-                    bridge ? bridge.longitude : 0)
-                anchorPoint.x: subMarkerVoyager.width  / 2
-                anchorPoint.y: subMarkerVoyager.height / 2
-                // UUV 아이콘 — 차량 yaw(뱃머리 방향)로 회전. 조이스틱 yaw에 실시간 반응.
-                sourceItem: Image {
-                    id: subMarkerVoyager
-                    source: "qrc:/assets/sub.png"
-                    width: 70; height: 70
-                    sourceSize.width: 140; sourceSize.height: 140
-                    fillMode: Image.PreserveAspectFit
-                    smooth: true; antialiasing: true; mipmap: true
-                    transform: Rotation {
-                        origin.x: subMarkerVoyager.width  / 2
-                        origin.y: subMarkerVoyager.height / 2
-                        // +90°: DAVE 시뮬의 yaw 프레임이 실제 이동방향보다 90° 반시계라 보정
-                        angle: vehicle ? vehicle.yaw * 180 / Math.PI + 90 : 0
+            // 다중로봇: 감지된 모든 차량을 마커로 표시. 활성(선택) 차량만 불투명, 나머지는 흐리게.
+            MapItemView {
+                model: vehicleManager
+                delegate: MapQuickItem {
+                    visible: model.vehicle && (model.vehicle.latitude !== 0 || model.vehicle.longitude !== 0)
+                    coordinate: QtPositioning.coordinate(
+                        model.vehicle ? model.vehicle.latitude  : 0,
+                        model.vehicle ? model.vehicle.longitude : 0)
+                    anchorPoint.x: markerImgVoyager.width  / 2
+                    anchorPoint.y: markerImgVoyager.height / 2
+                    sourceItem: Image {
+                        id: markerImgVoyager
+                        source: "qrc:/assets/sub.png"
+                        width: 70; height: 70
+                        sourceSize.width: 140; sourceSize.height: 140
+                        fillMode: Image.PreserveAspectFit
+                        smooth: true; antialiasing: true; mipmap: true
+                        opacity: (vehicleManager && model.sysid === vehicleManager.activeSysid) ? 1.0 : 0.45
+                        transform: Rotation {
+                            origin.x: markerImgVoyager.width  / 2
+                            origin.y: markerImgVoyager.height / 2
+                            // +90°: DAVE yaw 프레임 보정
+                            angle: model.vehicle ? model.vehicle.yaw * 180 / Math.PI + 90 : 0
+                        }
                     }
                 }
             }
@@ -841,7 +849,7 @@ Rectangle {
                 TextField {
                     id: portField
                     width: parent.width
-                    text: "14555"
+                    text: "14550"
                     color: "#dfe9eb"
                     font.pixelSize: 12
                     font.family: "monospace"

@@ -27,11 +27,24 @@ VehicleState* VehicleManager::getOrCreate(int sysid)
     emit vehicleAdded(sysid);
     emit countChanged();
 
-    // 활성 차량이 아직 없으면 첫 차량을 기본 활성으로.
-    if (_activeSysid == 0)
-        setActiveSysid(sysid);
+    // 사용자가 아직 안 골랐으면 가장 낮은 sysid(보통 1번)를 기본 활성으로 → 맵도 그쪽 중심.
+    _applyDefaultActive();
 
     return state;
+}
+
+
+// 사용자가 카드를 누르기 전까지, 현재 존재하는 가장 낮은 sysid를 활성으로 유지.
+void VehicleManager::_applyDefaultActive()
+{
+    if (_userPicked || _order.isEmpty()) return;
+    int lowest = _order.first();
+    for (int s : _order)
+        if (s < lowest) lowest = s;
+    if (lowest != _activeSysid) {
+        _activeSysid = lowest;
+        emit activeVehicleChanged();
+    }
 }
 
 
@@ -51,18 +64,29 @@ void VehicleManager::removeVehicle(int sysid)
     emit vehicleRemoved(sysid);
     emit countChanged();
 
-    // 활성 차량이 사라졌으면 남은 첫 차량으로(없으면 0).
-    if (_activeSysid == sysid)
-        setActiveSysid(_order.isEmpty() ? 0 : _order.first());
+    // 활성 차량이 사라졌으면 남은 것 중 가장 낮은 sysid로(없으면 0). 사용자 선택 플래그는 해제.
+    if (_activeSysid == sysid) {
+        int next = 0;
+        if (!_order.isEmpty()) {
+            next = _order.first();
+            for (int s : _order) if (s < next) next = s;
+        }
+        _userPicked  = false;
+        _activeSysid = next;
+        emit activeVehicleChanged();
+    }
 }
 
 
 void VehicleManager::clear()
 {
     if (_order.isEmpty()) {
-        if (_activeSysid != 0) setActiveSysid(0);
+        _userPicked = false;
+        if (_activeSysid != 0) { _activeSysid = 0; emit activeVehicleChanged(); }
         return;
     }
+
+    const QList<int> removed = _order;   // 마커 정리 통지용
 
     beginResetModel();
     const auto states = _vehicles.values();
@@ -73,13 +97,24 @@ void VehicleManager::clear()
     for (VehicleState* s : states)
         if (s) s->deleteLater();
 
+    // 각 차량 제거 통지 (TerrainScene 3D 마커 등 외부 정리용)
+    for (int sysid : removed)
+        emit vehicleRemoved(sysid);
+
     emit countChanged();
-    setActiveSysid(0);
+    // 연결 해제 → 사용자 선택 해제, 활성 0 (다음 연결 때 다시 기본=최저 sysid)
+    _userPicked  = false;
+    if (_activeSysid != 0) {
+        _activeSysid = 0;
+        emit activeVehicleChanged();
+    }
 }
 
 
+// 사용자(카드 클릭)가 활성 차량을 고른다. 이후 자동 기본값이 덮어쓰지 않는다.
 void VehicleManager::setActiveSysid(int sysid)
 {
+    _userPicked = true;
     if (_activeSysid == sysid) return;
     _activeSysid = sysid;
     emit activeVehicleChanged();

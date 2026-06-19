@@ -47,6 +47,7 @@ public:
     // Application 측에서 LinkManager/MavlinkManager 상태 변화를 미러
     void setConnected(bool c);
     void addDetectedSysid(int sysid);
+    void removeDetectedSysid(int sysid);   // 타임아웃된 차량 카드 제거
     void clearDetectedSysids();
     void setActiveSysidMirror(int sysid);   // emit만 (실제 변경은 MavlinkManager가)
 

@@ -75,9 +75,10 @@ void TerrainScene::attachTo(Qt3DCore::QEntity* parent)
     if (_rootEntity)
         _rootEntity->deleteLater();
 
-    _rootEntity    = new Qt3DCore::QEntity(parent);
-    _vehicleMarker = nullptr;
-    _vehicleXform  = nullptr;
+    _rootEntity = new Qt3DCore::QEntity(parent);
+
+    // 새 root → 기존 마커 엔티티 무효화 (포즈 데이터는 _markers에 유지 → 재빌드)
+    for (auto& m : _markers) { m.entity = nullptr; m.xform = nullptr; }
 
     if (!_chunks.isEmpty()) {
         // 캐시된 타일 이미지로 즉시 메시 재빌드
@@ -87,10 +88,13 @@ void TerrainScene::attachTo(Qt3DCore::QEntity* parent)
             if (it->osmReady && it->voyagerReady)
                 _buildChunkMesh(it.key().first, it.key().second);
         }
-        _updateVehicleMarker();
+        for (auto it = _markers.begin(); it != _markers.end(); ++it)
+            if (it->hasPos) _updateMarker(it.key());
         _resetCameraToTerrain();
-    } else if (_firstFixReceived && (_vehicleLat != 0.0 || _vehicleLon != 0.0)) {
-        loadTile(_vehicleLat, _vehicleLon, _zoom);
+    } else {
+        double lat, lon;
+        if (_activePos(lat, lon))
+            loadTile(lat, lon, _zoom);
     }
     // 둘 다 아니면(no cache, no GPS) QML 호출자가 loadTile로 트리거.
 }
@@ -117,20 +121,31 @@ void TerrainScene::loadTile(double lat, double lon, int zoom)
 }
 
 
-void TerrainScene::updateVehiclePosition(double lat, double lon)
+// 활성 차량의 위치를 반환 (마커 포즈가 있을 때만 true). 청크/카메라 추종에 사용.
+bool TerrainScene::_activePos(double& lat, double& lon) const
+{
+    auto it = _markers.find(_activeSysid);
+    if (it != _markers.end() && it->hasPos) {
+        lat = it->lat;
+        lon = it->lon;
+        return true;
+    }
+    return false;
+}
+
+
+void TerrainScene::updateVehiclePosition(int sysid, double lat, double lon)
 {
     if (lat == 0.0 && lon == 0.0) return;
 
-    _vehicleLat = lat;
-    _vehicleLon = lon;
+    VehicleMarker& m = _markers[sysid];
+    m.lat = lat; m.lon = lon; m.hasPos = true;
 
+    // 첫 위치 fix → 전역 원점 고정 (모든 마커가 이 기준으로 배치). 기본 좌표로 열린
+    // 청크가 있으면 폐기 후 이 위치 기준으로 재로드 (화면 밖 이탈 방지).
     if (!_firstFixReceived) {
         _firstFixReceived = true;
-        // entity 트리가 살아 있을 때만 즉시 로드. 아직 attachTo 전이면 좌표만 저장.
         if (_rootEntity) {
-            // 3D가 이미 기본 좌표로 열려 있을 수 있다. 첫 실제 GPS fix가 오면
-            // 원점을 로봇 위치로 재설정하고 청크를 다시 로드한다 (로봇이 화면 밖으로
-            // 벗어나는 것을 방지).
             for (auto& ch : _chunks)
                 if (ch.entity) ch.entity->deleteLater();
             _chunks.clear();
@@ -138,18 +153,15 @@ void TerrainScene::updateVehiclePosition(double lat, double lon)
             _curTileX  = INT_MIN;
             _curTileY  = INT_MIN;
             loadTile(lat, lon, _zoom);
-            _updateVehicleMarker();
-            _resetCameraToTerrain();
         }
-        return;
     }
 
-    if (!_rootEntity) return;
+    if (!_rootEntity || !_originSet) return;
 
-    _updateVehicleMarker();
+    _updateMarker(sysid);
 
-    // 로봇이 새 타일로 넘어가면 청크 갱신 (마인크래프트 청크 로드)
-    if (_originSet) {
+    // 활성 차량이면 청크/카메라가 따라간다 (새 타일 진입 시 갱신)
+    if (sysid == _activeSysid) {
         double gx, gy;
         latLonToGlobalPx(lat, lon, _zoom, gx, gy);
         const int tx = static_cast<int>(std::floor(gx / 256.0));
@@ -160,11 +172,42 @@ void TerrainScene::updateVehiclePosition(double lat, double lon)
 }
 
 
-void TerrainScene::updateVehicleDepth(double depthMeters)
+void TerrainScene::updateVehicleDepth(int sysid, double depthMeters)
 {
-    _vehicleDepth = (depthMeters > 0.0) ? depthMeters : 0.0;
+    VehicleMarker& m = _markers[sysid];
+    m.depth = (depthMeters > 0.0) ? depthMeters : 0.0;
     if (_rootEntity)
-        _updateVehicleMarker();
+        _updateMarker(sysid);
+}
+
+
+void TerrainScene::setVehicleYaw(int sysid, double deg)
+{
+    VehicleMarker& m = _markers[sysid];
+    m.yaw = deg;
+    if (_rootEntity)
+        _updateMarker(sysid);
+}
+
+
+void TerrainScene::removeVehicle(int sysid)
+{
+    auto it = _markers.find(sysid);
+    if (it == _markers.end()) return;
+    if (it->entity)
+        it->entity->deleteLater();
+    _markers.erase(it);
+}
+
+
+// 청크 로딩/카메라가 추종할 활성 차량 지정. 새 활성 위치로 재중심한다.
+void TerrainScene::setActiveSysid(int sysid)
+{
+    _activeSysid = sysid;
+    if (_rootEntity && _originSet) {
+        _updateChunks();
+        _resetCameraToTerrain();
+    }
 }
 
 
@@ -177,11 +220,9 @@ void TerrainScene::_updateChunks()
 {
     if (!_originSet || !_rootEntity) return;
 
-    // 중심 = 로봇 위치(있으면), 없으면 마지막 loadTile 좌표
-    double clat = (_firstFixReceived && (_vehicleLat != 0.0 || _vehicleLon != 0.0))
-                  ? _vehicleLat : _lat;
-    double clon = (_firstFixReceived && (_vehicleLat != 0.0 || _vehicleLon != 0.0))
-                  ? _vehicleLon : _lon;
+    // 중심 = 활성 차량 위치(있으면), 없으면 마지막 loadTile 좌표
+    double clat = _lat, clon = _lon;
+    _activePos(clat, clon);
 
     double gx, gy;
     latLonToGlobalPx(clat, clon, _zoom, gx, gy);
@@ -428,23 +469,25 @@ void TerrainScene::_buildChunkMesh(int tx, int ty)
 }
 
 
-void TerrainScene::_updateVehicleMarker()
+// sysid 마커(콘) 생성/위치/회전 갱신. 위치 fix가 있어야 렌더된다.
+void TerrainScene::_updateMarker(int sysid)
 {
-    if (!_rootEntity) return;
-    if (_vehicleLat == 0.0 && _vehicleLon == 0.0) return;
-    if (!_originSet) return;
+    if (!_rootEntity || !_originSet) return;
+    auto it = _markers.find(sysid);
+    if (it == _markers.end() || !it->hasPos) return;
+    VehicleMarker& m = it.value();
 
     double gx, gy;
-    latLonToGlobalPx(_vehicleLat, _vehicleLon, _zoom, gx, gy);
+    latLonToGlobalPx(m.lat, m.lon, _zoom, gx, gy);
     const float x = _worldX(gx);
     const float z = _worldZ(gy);
 
     // 해수면(y=0) 기준 실제 수심만큼 마커를 내린다. 수평과 동일 스케일 → 비율 정확.
-    const float mpp           = static_cast<float>(metersPerPixel(_vehicleLat, _zoom));
+    const float mpp           = static_cast<float>(metersPerPixel(m.lat, _zoom));
     const float unitsPerMeter = (mpp > 1e-9f) ? kWorldPerPixel / mpp : 0.0f;
-    const float y             = -static_cast<float>(_vehicleDepth) * unitsPerMeter;
+    const float y             = -static_cast<float>(m.depth) * unitsPerMeter;
 
-    if (!_vehicleMarker) {
+    if (!m.entity) {
         auto* marker = new Qt3DCore::QEntity(_rootEntity.data());
 
         // 방향성 콘(화살표) — 뱃머리 방향을 가리킨다. 기본 축은 +Y(뾰족한 끝).
@@ -467,18 +510,18 @@ void TerrainScene::_updateVehicleMarker()
         marker->addComponent(mat);
         marker->addComponent(xform);
 
-        _vehicleMarker = marker;
-        _vehicleXform  = xform;
+        m.entity = marker;
+        m.xform  = xform;
     }
 
     // 콘을 수평으로 눕혀(tip→북) yaw만큼 회전 → 끝이 뱃머리(compass) 방향을 가리킴.
     //   Rx(-90): +Y(끝) → -Z(북),  Ry(-yaw): 북 기준 시계방향으로 yaw만큼 스윙
     const QQuaternion rot =
-        QQuaternion::fromAxisAndAngle(0.0f, 1.0f, 0.0f, -static_cast<float>(_vehicleYaw))
+        QQuaternion::fromAxisAndAngle(0.0f, 1.0f, 0.0f, -static_cast<float>(m.yaw))
       * QQuaternion::fromAxisAndAngle(1.0f, 0.0f, 0.0f, -90.0f);
-    _vehicleXform->setRotation(rot);
-    _vehicleXform->setTranslation(QVector3D(x, y, z));
-    _vehicleMarker->setEnabled(true);
+    m.xform->setRotation(rot);
+    m.xform->setTranslation(QVector3D(x, y, z));
+    m.entity->setEnabled(true);
 }
 
 
@@ -487,9 +530,10 @@ void TerrainScene::_resetCameraToTerrain()
     if (!_camera) return;
 
     QVector3D target(0.0f, 0.0f, 0.0f);
-    if (_originSet && (_vehicleLat != 0.0 || _vehicleLon != 0.0)) {
+    double lat, lon;
+    if (_originSet && _activePos(lat, lon)) {
         double gx, gy;
-        latLonToGlobalPx(_vehicleLat, _vehicleLon, _zoom, gx, gy);
+        latLonToGlobalPx(lat, lon, _zoom, gx, gy);
         target = QVector3D(_worldX(gx), 0.0f, _worldZ(gy));
     }
 

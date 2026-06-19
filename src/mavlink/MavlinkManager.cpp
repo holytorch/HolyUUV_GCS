@@ -1,5 +1,9 @@
 #include "MavlinkManager.h"
 #include "util/log/logger.h"
+#include <QList>
+
+// 차량 HEARTBEAT가 이 시간(ms) 이상 끊기면 타임아웃 처리 (그 차량만 제거).
+static constexpr qint64 kVehicleTimeoutMs = 5000;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // MavlinkManager()
@@ -21,13 +25,11 @@ MavlinkManager::MavlinkManager(QObject* parent) : QObject(parent)
 #endif
     });
 
-    _vehicleWatchdog = new QTimer(this);
-    _vehicleWatchdog->setSingleShot(true);
-    _vehicleWatchdog->setInterval(5000);
-    connect(_vehicleWatchdog, &QTimer::timeout, this, [this]() {
-        LOG_INFO("Vehicle heartbeat timeout (5s) → disconnect");
-        emit vehicleTimedOut();
-    });
+    // per-vehicle 워치독 — 1초마다 각 차량의 마지막 HEARTBEAT를 점검.
+    _uptime.start();
+    _vehicleSweep = new QTimer(this);
+    _vehicleSweep->setInterval(1000);
+    connect(_vehicleSweep, &QTimer::timeout, this, &MavlinkManager::_sweepVehicles);
 
     qInfo("[init] MavlinkManager");
 }
@@ -89,14 +91,12 @@ void MavlinkManager::parseBytes(const QByteArray& data)
                         }
                     }
 
-                    // 어떤 autopilot HEARTBEAT라도 수신되면 watchdog 리셋 (활성 sysid 무관).
-                    // 자동 latch 제거 후 사용자가 카드 클릭 전에는 _activeSysid=0이라
-                    // 활성 필터를 걸면 watchdog가 5초 후 만료되어 링크가 자동 해제됨.
-                    if (isAutopilot && _vehicleWatchdog->isActive())
-                        _vehicleWatchdog->start();
+                    // autopilot HEARTBEAT 수신 시각 기록 (per-vehicle 워치독용).
+                    if (isAutopilot)
+                        _lastSeen[fromSysid] = _uptime.elapsed();
 
-                    // 활성 차량의 HEARTBEAT만 VehicleState로 전달.
-                    if (fromSysid == _activeSysid && _message.compid == _targetCompid) {
+                    // 모든 차량의 HEARTBEAT을 sysid 태그와 함께 전달 (VehicleManager가 분배).
+                    if (isAutopilot) {
                         MavlinkHeartbeat out;
                         out.sysid        = fromSysid;
                         out.type         = hb.type;
@@ -110,7 +110,6 @@ void MavlinkManager::parseBytes(const QByteArray& data)
                 }
 
                 case MAVLINK_MSG_ID_ATTITUDE: {
-                    if (_message.sysid != _activeSysid) break;
                     mavlink_attitude_t att;
                     mavlink_msg_attitude_decode(&_message, &att);
                     MavlinkAttitude out;
@@ -135,8 +134,8 @@ void MavlinkManager::parseBytes(const QByteArray& data)
                         static_cast<int>(static_cast<int8_t>(sys.battery_remaining)),
                         sys.voltage_battery / 1000.0f);
 
-                    // 활성 차량만 VehicleState로 (컨트롤 센터 표시용)
-                    if (_message.sysid == _activeSysid) {
+                    // 모든 차량의 상세 상태를 sysid 태그와 함께 전달 (VehicleManager가 분배)
+                    {
                         MavlinkSysStatus out;
                         out.sysid            = _message.sysid;
                         out.voltageBattery   = sys.voltage_battery;
@@ -164,7 +163,6 @@ void MavlinkManager::parseBytes(const QByteArray& data)
                 }
 
                 case MAVLINK_MSG_ID_VFR_HUD: {
-                    if (_message.sysid != _activeSysid) break;
                     mavlink_vfr_hud_t hud;
                     mavlink_msg_vfr_hud_decode(&_message, &hud);
                     MavlinkVfrHud out;
@@ -178,7 +176,6 @@ void MavlinkManager::parseBytes(const QByteArray& data)
                 }
 
                 case MAVLINK_MSG_ID_GLOBAL_POSITION_INT: {
-                    if (_message.sysid != _activeSysid) break;
                     mavlink_global_position_int_t pos;
                     mavlink_msg_global_position_int_decode(&_message, &pos);
                     MavlinkGlobalPosition out;
@@ -207,7 +204,6 @@ void MavlinkManager::parseBytes(const QByteArray& data)
                 }
 
                 case MAVLINK_MSG_ID_GPS_RAW_INT: {
-                    if (_message.sysid != _activeSysid) break;
                     mavlink_gps_raw_int_t gps;
                     mavlink_msg_gps_raw_int_decode(&_message, &gps);
                     MavlinkGpsRaw out;
@@ -319,14 +315,36 @@ void MavlinkManager::sendManualControl(int16_t x, int16_t y, int16_t z,
 void MavlinkManager::startHeartbeat()
 {
     _gcsHeartbeatTimer->start();
-    _vehicleWatchdog->start();
-    LOG_INFO("GCS heartbeat started (1Hz), vehicle watchdog started (5s)");
+    _vehicleSweep->start();
+    LOG_INFO("GCS heartbeat started (1Hz), per-vehicle watchdog started (%llds)",
+             static_cast<long long>(kVehicleTimeoutMs / 1000));
 }
 
 void MavlinkManager::stopHeartbeat()
 {
     _gcsHeartbeatTimer->stop();
-    _vehicleWatchdog->stop();
+    _vehicleSweep->stop();
+    _lastSeen.clear();
+}
+
+
+// per-vehicle 워치독 스윕: 마지막 HEARTBEAT가 kVehicleTimeoutMs 이상 끊긴 차량을
+// 추적에서 제거하고 vehicleTimedOut(sysid)을 발신한다 (링크는 유지).
+void MavlinkManager::_sweepVehicles()
+{
+    const qint64 now = _uptime.elapsed();
+    QList<int> timedOut;
+    for (auto it = _lastSeen.constBegin(); it != _lastSeen.constEnd(); ++it)
+        if (now - it.value() > kVehicleTimeoutMs)
+            timedOut.append(it.key());
+
+    for (int sysid : timedOut) {
+        LOG_INFO("Vehicle %d heartbeat timeout → removed (link stays up)", sysid);
+        _lastSeen.remove(sysid);
+        _detectedSysids.remove(static_cast<uint8_t>(sysid));
+        _sysidCompid.remove(static_cast<uint8_t>(sysid));
+        emit vehicleTimedOut(sysid);
+    }
 }
 
 
@@ -339,6 +357,7 @@ void MavlinkManager::resetVehicleLatch()
 {
     _detectedSysids.clear();
     _sysidCompid.clear();
+    _lastSeen.clear();
     if (_activeSysid != 0) {
         _activeSysid = 0;
         emit activeSysidChanged(0);

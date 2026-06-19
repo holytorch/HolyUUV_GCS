@@ -76,19 +76,26 @@ bool UdpLink::isConnected() const
 
 // ─────────────────────────────────────────────────────────────────────────────
 // sendBytes()
-// UDP 데이터그램을 전송한다.
-// 한 번이라도 패킷을 받았으면 그 발신자에게 답신 (SITL/MAVProxy의 ephemeral 포트 대응),
-// 아직 못 받았으면 설정의 remoteHost:remotePort로 fallback (초기 인사용).
+// UDP 데이터그램을 전송한다 (QGC 방식).
+// 등록된 발신자(로봇)가 있으면 전원에게 보낸다 — HEARTBEAT은 브로드캐스트,
+// 명령은 페이로드의 target_system 덕에 대상 로봇만 처리한다 (다른 로봇은 무시).
+// 아직 발신자가 없으면 설정의 remoteHost:remotePort로 fallback (초기 인사용).
 // ─────────────────────────────────────────────────────────────────────────────
 bool UdpLink::sendBytes(const QByteArray& data)
 {
     if (!isConnected()) return false;
 
-    const QHostAddress addr = _hasSeenSender ? _senderAddr  : QHostAddress(_config.remoteHost);
-    const quint16      port = _hasSeenSender ? _senderPort  : _config.remotePort;
+    if (_senders.isEmpty()) {
+        const qint64 sent = _socket->writeDatagram(
+            data, QHostAddress(_config.remoteHost), _config.remotePort);
+        return sent == data.size();
+    }
 
-    const qint64 sent = _socket->writeDatagram(data, addr, port);
-    return sent == data.size();
+    bool ok = true;
+    for (const Endpoint& ep : _senders)
+        if (_socket->writeDatagram(data, ep.addr, ep.port) != data.size())
+            ok = false;
+    return ok;
 }
 
 
@@ -103,8 +110,8 @@ QString UdpLink::linkName() const
 
 // ─────────────────────────────────────────────────────────────────────────────
 // onReadyRead()
-// 대기 중인 데이터그램을 모두 읽고, 첫 패킷의 발신자 주소를 기억한다.
-// 기억된 주소는 sendBytes()가 답신할 때 사용한다 (자동 sender latch).
+// 대기 중인 데이터그램을 모두 읽는다. 새 발신자(로봇)가 push해오면 자동 등록해
+// 이후 송신 대상에 포함한다 (QGC 방식 — 포트 하나로 여러 로봇 수신).
 // ─────────────────────────────────────────────────────────────────────────────
 void UdpLink::onReadyRead()
 {
@@ -116,12 +123,11 @@ void UdpLink::onReadyRead()
         quint16      senderPort = 0;
         _socket->readDatagram(buf.data(), buf.size(), &sender, &senderPort);
 
-        if (!_hasSeenSender) {
-            _senderAddr    = sender;
-            _senderPort    = senderPort;
-            _hasSeenSender = true;
-            LOG_INFO("UDP sender locked: %s:%d",
-                     qPrintable(sender.toString()), senderPort);
+        const Endpoint ep{ sender, senderPort };
+        if (!_senders.contains(ep)) {
+            _senders.append(ep);
+            LOG_INFO("UDP sender registered: %s:%d (total %d)",
+                     qPrintable(sender.toString()), senderPort, _senders.size());
         }
 
         emit bytesReceived(buf);

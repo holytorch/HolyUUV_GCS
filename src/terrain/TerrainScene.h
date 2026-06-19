@@ -45,14 +45,16 @@ public:
     Q_INVOKABLE void attachTo(Qt3DCore::QEntity* parent);
 
     Q_INVOKABLE void loadTile(double lat, double lon, int zoom = 17);
-    Q_INVOKABLE void updateVehiclePosition(double lat, double lon);
-    Q_INVOKABLE void updateVehicleDepth(double depthMeters);   // 수면 아래 깊이(m, 양수)
 
-    // 전방 우선 로딩에 쓰는 heading(도, 0=N). C++에서만 호출.
+    // 다중로봇: sysid별 마커. 차량 텔레메트리 갱신 시 C++(MainWindow)에서 호출.
+    void updateVehiclePosition(int sysid, double lat, double lon);
+    void updateVehicleDepth(int sysid, double depthMeters);   // 수면 아래 깊이(m, 양수)
+    void setVehicleYaw(int sysid, double deg);                // 마커 콘 방향(도, 0=N)
+    void removeVehicle(int sysid);                            // 차량 마커 제거
+
+    // 청크 로딩/카메라가 추종할 활성 차량 지정 + 그 차량 heading(전방 우선 로딩용)
+    void setActiveSysid(int sysid);
     void setVehicleHeading(double deg) { _vehicleHeading = deg; }
-
-    // 마커(콘) 방향용 yaw(도, 0=N, 시계방향). 갱신 시 마커를 즉시 회전시킨다.
-    void setVehicleYaw(double deg) { _vehicleYaw = deg; if (_rootEntity) _updateVehicleMarker(); }
 
 signals:
     void terrainReady();
@@ -68,16 +70,25 @@ private:
     void _updateChunks();                 // 렌더 반경 기준 로드/언로드
     void _requestChunk(int tx, int ty);   // OSM+Voyager 타일 요청
     void _buildChunkMesh(int tx, int ty); // 수신된 타일로 청크 메시 생성
-    void _updateVehicleMarker();
+    void _updateMarker(int sysid);        // sysid 마커 생성/위치/회전 갱신
     void _resetCameraToTerrain();
+    bool _activePos(double& lat, double& lon) const;  // 활성 차량 위치(있으면)
 
     // 전역 픽셀 → 월드 좌표
     float _worldX(double globalPx) const { return static_cast<float>(globalPx - _originPxX) * kWorldPerPixel; }
     float _worldZ(double globalPy) const { return static_cast<float>(globalPy - _originPxY) * kWorldPerPixel; }
 
     QPointer<Qt3DCore::QEntity>    _rootEntity;
-    QPointer<Qt3DCore::QEntity>    _vehicleMarker;
-    QPointer<Qt3DCore::QTransform> _vehicleXform;
+
+    // 다중로봇: sysid별 마커 (콘 엔티티 + 변환 + 최신 포즈). parent=_rootEntity (RAII)
+    struct VehicleMarker {
+        QPointer<Qt3DCore::QEntity>    entity;
+        QPointer<Qt3DCore::QTransform> xform;
+        double lat = 0.0, lon = 0.0, depth = 0.0, yaw = 0.0;
+        bool   hasPos = false;
+    };
+    QMap<int, VehicleMarker> _markers;
+    int    _activeSysid = 0;        // 청크 로딩/카메라가 추종하는 차량
 
     Qt3DRender::QCamera* _camera = nullptr;
     QNetworkAccessManager _nam;
@@ -86,11 +97,7 @@ private:
     double _lon  = 126.94149832867085;
     int    _zoom = 17;
 
-    double _vehicleLat     = 0.0;
-    double _vehicleLon     = 0.0;
-    double _vehicleDepth   = 0.0;   // 수면 기준 깊이(m, 양수=아래)
-    double _vehicleHeading = 0.0;   // compass heading(도, 0=N) — 청크 전방 우선 로딩용
-    double _vehicleYaw     = 0.0;   // yaw(도, 0=N) — 마커 콘 방향용
+    double _vehicleHeading = 0.0;   // 활성 차량 heading(도, 0=N) — 청크 전방 우선 로딩용
     bool   _firstFixReceived = false;
 
     // ── 청크 시스템 ──────────────────────────────────────────────────────────
