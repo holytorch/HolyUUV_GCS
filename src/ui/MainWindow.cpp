@@ -11,7 +11,7 @@ MainWindow::MainWindow(VehicleManager* vehicles, LogFeed* logFeed, QWidget* pare
 {
     setWindowTitle("HolyUUV GCS");
     resize(1600, 900);
-    setMinimumSize(1024, 768);   // 이 이하로는 축소 불가 (레이아웃 깨짐 방지)
+    setMinimumSize(1280, 960);   // 이 이하로는 축소 불가 (레이아웃 깨짐 방지)
     statusBar()->hide();
     _setupUi();
 

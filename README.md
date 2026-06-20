@@ -31,6 +31,17 @@ and broader hardware support in future releases.
 
 ---
 
+## How it connects
+
+![Comms architecture: flight controller to companion computer (MAVROS) to remote GCS](assets/comms-architecture.svg)
+
+On a real vehicle the **flight controller** talks to an onboard **companion computer** (running
+**MAVROS**) over a serial/UART link (`fcu_url`), and the companion relays MAVLink to the **remote GCS**
+over UDP (`gcs_url`, port `14550`). In simulation, ArduSub SITL plays the flight controller and the GCS
+connects the exact same way.
+
+---
+
 ## Development
 
 HolyUUV GCS was developed and validated using **Gazebo** simulation via **[Project DAVE](https://github.com/Field-Robotics-Lab/dave)**,
