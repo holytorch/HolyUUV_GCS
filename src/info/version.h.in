@@ -1,14 +1,17 @@
 #pragma once
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 버전 상수
-// CMake에서 HOLYUUV_GCS_BUILD_DATE를 빌드 날짜(YYYYMMDD)로 정의해 전달한다.
+// 버전 상수 — 이 파일(version.h)은 CMake가 version.h.in 템플릿에서 '생성'한다.
+// 직접 수정하지 말 것. 단일 소스는 CMakeLists.txt 의 PROJECT(... VERSION x.y.z)
+// (편하게는 ./scripts/set_version.sh X.Y.Z).
+// HOLYUUV_GCS_BUILD_DATE 는 빌드 날짜(YYYYMMDD)로 CMake가 정의한다.
 // ─────────────────────────────────────────────────────────────────────────────
 #define HOLYUUV_GCS_NAME            "HolyUUV GCS"
 #define HOLYUUV_GCS_MANUFACTURER    "HolyTorch"
-#define HOLYUUV_GCS_VERSION_MAJOR   1
-#define HOLYUUV_GCS_VERSION_MINOR   0
-#define HOLYUUV_GCS_VERSION_PATCH   3
+#define HOLYUUV_GCS_VERSION_MAJOR   @PROJECT_VERSION_MAJOR@
+#define HOLYUUV_GCS_VERSION_MINOR   @PROJECT_VERSION_MINOR@
+#define HOLYUUV_GCS_VERSION_PATCH   @PROJECT_VERSION_PATCH@
+#define HOLYUUV_GCS_VERSION_STRING  "@PROJECT_VERSION@"
 
 #ifndef HOLYUUV_GCS_BUILD_DATE
 #define HOLYUUV_GCS_BUILD_DATE "00000000"

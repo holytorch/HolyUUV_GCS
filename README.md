@@ -1,4 +1,4 @@
-# HolyUUV_GCS v1.0.1
+# HolyUUV_GCS v1.1.1
 
 ![HolyUUV GCS](assets/example.png)
 
@@ -10,6 +10,17 @@ This project is actively maintained and will continue to evolve with new feature
 and broader hardware support in future releases.
 
 📖 **[Documentation](https://holytorch.github.io/HolyUUV_GCS/)** — installation, usage, simulator connection, and more.
+
+---
+
+## Features
+
+- **Real-time telemetry** — attitude, depth, battery, GPS, heading, and link quality
+- **Vehicle control** — arm/disarm, flight modes (Manual / Stabilize / Alt-Hold), and dual on-screen joysticks (MANUAL_CONTROL @ 50 Hz)
+- **Multi-vehicle** — control several robots over one UDP port at once, told apart by MAVLink `sysid`; click a vehicle to switch control to it
+- **3D terrain** — chunked terrain that follows the active vehicle, over OSM / satellite map tiles
+- **File logging** — console output is mirrored to rotating log files at `~/.local/share/HolyUUV_GCS/logs/`, with crash backtraces captured
+- **QGC-style UDP** — binds a fixed local port and receives from every sender (push model)
 
 ---
 
@@ -27,24 +38,25 @@ a high-fidelity underwater robotics simulation environment.
 
 ---
 
-## Current Limitations
+## Feature Status
 
-> This project is under active development. The following features are planned for upcoming releases.
+> Feature status at a glance — this project is under active development.
 
 | Feature | Status |
 |---|---|
 | Simulator connection (Gazebo / SITL) | ✅ Supported |
 | Real hardware connection | 🔜 Planned |
-| Multi-vehicle support | 🔜 Planned |
 | Single-vehicle control | ✅ Supported |
+| Multi-vehicle support (simulator) | ✅ Supported |
 
-Real hardware integration and multi-vehicle support are on the roadmap and will be introduced in future updates.
+Real hardware integration is on the roadmap and will be introduced in future updates.
 
 ---
 
 ## License
 
-This project is licensed under the **MIT License** — see [LICENSE](LICENSE) for details.
+This project is licensed under the **Apache License 2.0** — see [LICENSE](LICENSE) and [NOTICE](NOTICE) for details.
+You may use, modify, and distribute it freely, provided you retain the original attribution.
 
 This software uses **Qt 5**, which is licensed under the **GNU LGPL v3**.
 Qt is dynamically linked, and its source is available at [qt.io](https://www.qt.io/).

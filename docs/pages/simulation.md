@@ -33,6 +33,13 @@ On a real vehicle the **flight controller** talks to an onboard **companion comp
 GCS** over UDP (`gcs_url`, port `14550`). In simulation, ArduSub SITL plays the flight controller and
 everything runs on one host — the GCS connects exactly the same way.
 
+![Simulator port layout: FC to MAVROS on tcp 5760/5770, MAVROS to GCS on udp 14550, all on 127.0.0.1]({{ '/assets/images/comms-ports-sim.svg' | relative_url }})
+
+In the simulator the flight controller (ArduSub SITL) talks to MAVROS on a **5000-range** port
+(`tcp 5760`, `+10` for each extra robot), and every MAVROS streams to the GCS on the shared
+**`udp 14550`** — all on the same IP (`127.0.0.1`). Robots are told apart by their **`sysid`**, not by
+address.
+
 There are two parts:
 
 1. **Set up Project DAVE** — native on your host, or in Docker.

@@ -13,12 +13,18 @@
 // ─────────────────────────────────────────────────────────────────────────────
 namespace {
 
+// 로그 파일 fd. Logger::init() 이 setLogFd로 설정한다. 음수면 파일 덤프 생략.
+// 시그널 컨텍스트에서 읽으므로 volatile sig_atomic_t.
+volatile sig_atomic_t g_logFd = -1;
+
 // write()는 async-signal-safe. strlen도 마찬가지.
+// stderr 와 (설정돼 있으면) 로그 파일 fd 양쪽에 쓴다.
 void safeWrite(const char* s)
 {
     if (!s) return;
-    const ssize_t r = ::write(STDERR_FILENO, s, std::strlen(s));
-    (void)r;   // 핸들러 안이라 에러 처리할 길이 없음 — 경고만 억제
+    const std::size_t len = std::strlen(s);
+    const ssize_t r1 = ::write(STDERR_FILENO, s, len); (void)r1;
+    if (g_logFd >= 0) { const ssize_t r2 = ::write(g_logFd, s, len); (void)r2; }
 }
 
 // backtrace_symbols_fd는 malloc 없이 fd로 직접 출력 → async-signal-safe.
@@ -28,6 +34,7 @@ void dumpBacktrace()
     void* frames[64];
     const int n = ::backtrace(frames, 64);
     ::backtrace_symbols_fd(frames, n, STDERR_FILENO);
+    if (g_logFd >= 0) ::backtrace_symbols_fd(frames, n, g_logFd);
 }
 
 void signalHandler(int sig)
@@ -95,4 +102,10 @@ void CrashHandler::install()
     ::signal(SIGILL,  signalHandler);
 
     std::set_terminate(terminateHandler);
+}
+
+
+void CrashHandler::setLogFd(int fd)
+{
+    g_logFd = fd;
 }

@@ -1,0 +1,11 @@
+HolyUUV GCS
+Copyright 2026 Holytorch
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+When you use, modify, or redistribute this software, you must retain this
+attribution to the original author (Holytorch / HolyUUV_GCS).
+
+This product includes third-party components under their own licenses:
+  - Qt 5 — GNU LGPL v3 (dynamically linked); source at https://www.qt.io/
+  - MAVLink c_library_v2 — MIT License

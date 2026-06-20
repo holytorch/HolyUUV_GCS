@@ -15,4 +15,9 @@
 // ─────────────────────────────────────────────────────────────────────────────
 namespace CrashHandler {
     void install();
+
+    // 크래시 백트레이스를 stderr 외에 이 파일 디스크립터에도 함께 덤프한다.
+    // Logger::init()이 로그 파일을 연 뒤 그 fd를 넘겨준다 (음수면 파일 덤프 생략).
+    // ::write / backtrace_symbols_fd 만 쓰므로 async-signal-safe 가 유지된다.
+    void setLogFd(int fd);
 }

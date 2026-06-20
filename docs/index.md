@@ -41,6 +41,6 @@ Want to quickly test with a simulated underwater robot? → [GCS + Simulator]({%
 
 ## License
 
-Released under the [MIT License](https://github.com/holytorch/HolyUUV_GCS/blob/main/LICENSE).
+Released under the [Apache License 2.0](https://github.com/holytorch/HolyUUV_GCS/blob/main/LICENSE) — free to use, modify, and distribute with attribution.
 Uses Qt 5 (LGPL v3, dynamically linked) and MAVLink `c_library_v2` (MIT).
 

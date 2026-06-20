@@ -86,6 +86,8 @@ This is internal plumbing between the simulator and the autopilot — from the G
 Everything that must be **unique per robot** when they share a machine. Only the GCS **remote** port
 (`14550`) is shared — every other port is per-instance.
 
+![Simulator port layout: FC to MAVROS on tcp 5760/5770, MAVROS to GCS on udp 14550, same IP]({{ '/assets/images/comms-ports-sim.svg' | relative_url }})
+
 | Per robot | robot 1 | robot 2 | rule for robot N |
 |---|---|---|---|
 | ArduSub instance | `-I0` | `-I1` | `-I(N-1)` |

@@ -68,6 +68,14 @@ int main(int argc, char* argv[])
         HOLYUUV_GCS_VERSION_MINOR,
         HOLYUUV_GCS_VERSION_PATCH);
 
+    // 로그 파일 저장 위치 안내 (배너 바로 아래)
+    {
+        const QString logPath = Logger::logFilePath();
+        std::fprintf(stderr, "  Log file: %s\n\n",
+                     logPath.isEmpty() ? "(파일 열기 실패 — 콘솔 출력만)"
+                                       : qUtf8Printable(logPath));
+    }
+
     // Application 스택 메모리 객체 생성 및 초기화
     Application app;
 
