@@ -7,13 +7,14 @@
 
 // ─────────────────────────────────────────────────────────────────────────────
 // TileCacheWorker
-// SQLite DB 작업을 전담하는 워커 객체. moveToThread()로 별도 스레드에서 실행된다.
-// 메인 스레드와 시그널/슬롯으로만 통신하며, 직접 함수 호출은 금지된다.
+// A worker object dedicated to SQLite DB operations, run on a separate thread via
+// moveToThread(). It communicates with the main thread only through signals/slots;
+// direct function calls are forbidden.
 //
-// 캐시 정책:
-//   - 최대 5 GB (MAX_BYTES) 초과 시 LRU 방식으로 4 GB (EVICT_BYTES)까지 삭제
-//   - ts(타임스탬프) 컬럼을 접근 시마다 갱신해 자주 사용되는 타일을 보존
-//   - WAL 모드 + NORMAL 동기화로 쓰기 성능과 안전성 균형
+// Cache policy:
+//   - when the size exceeds 5 GB (MAX_BYTES), evict LRU-style down to 4 GB (EVICT_BYTES)
+//   - refresh the ts (timestamp) column on every access to preserve frequently used tiles
+//   - WAL mode + NORMAL synchronization to balance write performance and safety
 // ─────────────────────────────────────────────────────────────────────────────
 class TileCacheWorker : public QObject {
     Q_OBJECT

@@ -5,9 +5,10 @@
 
 // ─────────────────────────────────────────────────────────────────────────────
 // TileCache()
-// TileCacheWorker를 별도 스레드로 이동시키고 메인↔워커 신호 연결을 설정한다.
-// dbPath가 비어 있으면 기본 캐시 경로를 사용한다 (~/.cache/HolyUUV_GCS/tiles/tiles.db).
-// DB 초기화는 _doInit 신호를 통해 워커 스레드에서 비동기로 수행된다.
+// Moves the TileCacheWorker onto a separate thread and wires the main↔worker
+// signal connections. If dbPath is empty, the default cache path is used
+// (~/.cache/HolyUUV_GCS/tiles/tiles.db). DB initialization runs asynchronously on
+// the worker thread via the _doInit signal.
 // ─────────────────────────────────────────────────────────────────────────────
 TileCache::TileCache(const QString& dbPath, QObject* parent)
     : QObject(parent)
@@ -38,7 +39,8 @@ TileCache::TileCache(const QString& dbPath, QObject* parent)
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ~TileCache()
-// 워커 스레드의 이벤트 루프를 종료하고 완전히 멈출 때까지 대기한 뒤 워커를 삭제한다.
+// Stops the worker thread's event loop, waits for it to fully halt, then deletes
+// the worker.
 // ─────────────────────────────────────────────────────────────────────────────
 TileCache::~TileCache()
 {
@@ -52,8 +54,8 @@ TileCache::~TileCache()
 
 // ─────────────────────────────────────────────────────────────────────────────
 // lookup()
-// _doLookup 신호를 통해 워커 스레드에 비동기 조회를 요청한다.
-// 결과는 tileFound 또는 tileMissed 신호로 수신된다.
+// Requests an asynchronous lookup on the worker thread via the _doLookup signal.
+// The result arrives as a tileFound or tileMissed signal.
 // ─────────────────────────────────────────────────────────────────────────────
 void TileCache::lookup(const QString& key, QPointer<QTcpSocket> socket, const QString& url)
 {
@@ -63,7 +65,7 @@ void TileCache::lookup(const QString& key, QPointer<QTcpSocket> socket, const QS
 
 // ─────────────────────────────────────────────────────────────────────────────
 // store()
-// _doStore 신호를 통해 워커 스레드에 비동기 저장을 요청한다.
+// Requests an asynchronous store on the worker thread via the _doStore signal.
 // ─────────────────────────────────────────────────────────────────────────────
 void TileCache::store(const QString& key, const QByteArray& data)
 {

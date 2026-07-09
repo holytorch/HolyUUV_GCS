@@ -6,12 +6,13 @@
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ILink
-// 모든 통신 링크(Serial, UDP, TCP)가 구현해야 하는 순수 가상 인터페이스.
-// LinkManager는 이 인터페이스만 알고 있어 링크 종류와 무관하게 동작한다.
+// The pure-virtual interface that every communication link (Serial, UDP, TCP)
+// must implement. LinkManager depends only on this interface, so it operates
+// independently of the concrete link type.
 //
-// 흐름:
-//   ILink 구현체 → bytesReceived 신호 → LinkManager → MavlinkManager
-//   MavlinkManager → 명령 → LinkManager.sendBytes() → ILink 구현체
+// Flow:
+//   ILink implementation → bytesReceived signal → LinkManager → MavlinkManager
+//   MavlinkManager → command → LinkManager.sendBytes() → ILink implementation
 // ─────────────────────────────────────────────────────────────────────────────
 class ILink : public QObject {
     Q_OBJECT

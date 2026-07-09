@@ -11,8 +11,9 @@ QtMessageHandler LogFeed::_prevHandler  = nullptr;
 LogFeed::LogFeed(QObject* parent)
     : QObject(parent)
 {
-    // 메시지 핸들러는 프로세스 전역 — _instance 첫 LogFeed만 핸들러 설치.
-    // 부팅 가장 앞에서 설치돼야 이후 모든 [init] 로그가 인앱 피드에도 캡처된다.
+    // The message handler is process-global — only the first LogFeed (_instance)
+    // installs it. It must be installed at the very start of boot so that all
+    // subsequent [init] logs are captured in the in-app feed too.
     if (!_instance) {
         _instance    = this;
         _prevHandler = qInstallMessageHandler(_qtMessageHandler);
@@ -22,13 +23,14 @@ LogFeed::LogFeed(QObject* parent)
 }
 
 
-// 활성 차량의 상태 전이 로그를 연결한다. 다중로봇에서 활성 차량이 바뀌면
-// 다시 호출되며, 이전 차량의 시그널 연결을 먼저 해제(네트워크 아님 — 시그널/슬롯만)한다.
+// Connects the active vehicle's state-transition logs. In multi-robot mode this is
+// called again when the active vehicle changes, first disconnecting the previous
+// vehicle's signals (signal/slot only — nothing network-related).
 void LogFeed::bindVehicle(VehicleState* state)
 {
     if (_state == state) return;
     if (_state)
-        disconnect(_state, nullptr, this, nullptr);   // 이전 차량 시그널 듣기 중단
+        disconnect(_state, nullptr, this, nullptr);   // stop listening to the previous vehicle
 
     _state = state;
     if (!_state) return;
@@ -57,9 +59,9 @@ LogFeed::~LogFeed()
 }
 
 
-// qInstallMessageHandler 콜백. 임의 스레드에서 호출될 수 있다.
-// 1) 원래 핸들러 호출 → 터미널에 그대로 찍힘
-// 2) _instance가 살아 있으면 GUI 스레드로 큐잉해서 append
+// qInstallMessageHandler callback. May be invoked from any thread.
+// 1) call the original handler → still printed to the terminal
+// 2) if _instance is alive, queue an append onto the GUI thread
 void LogFeed::_qtMessageHandler(QtMsgType type,
                                 const QMessageLogContext& ctx,
                                 const QString& msg)
@@ -78,7 +80,7 @@ void LogFeed::_qtMessageHandler(QtMsgType type,
     }
     const QString line = QStringLiteral("[%1] %2").arg(QString::fromLatin1(tag), msg);
 
-    // GUI 스레드로 큐잉 (이 함수가 워커 스레드에서 호출될 수 있음).
+    // Queue onto the GUI thread (this function may be called from a worker thread).
     QMetaObject::invokeMethod(_instance, "append", Qt::QueuedConnection,
                               Q_ARG(QString, line));
 }
@@ -111,7 +113,7 @@ void LogFeed::_push(const QString& line)
 }
 
 
-// ── VehicleState 슬롯들 ─────────────────────────────────────────────────────
+// ── VehicleState slots ──────────────────────────────────────────────────────
 
 void LogFeed::_onArmedChanged()
 {
@@ -135,7 +137,7 @@ void LogFeed::_onHeartbeatStatusChanged()
 
 void LogFeed::_onGpsChanged()
 {
-    // GPS fix 판단: 위성 3개 이상 + 좌표가 (0,0) 아님
+    // GPS-fix test: at least 3 satellites + coordinates not at (0,0)
     const bool hasFix = _state->gpsSatCount() >= 3
                      && (_state->latitude() != 0.0 || _state->longitude() != 0.0);
 
@@ -154,9 +156,9 @@ void LogFeed::_onGpsChanged()
 void LogFeed::_onBatteryChanged()
 {
     const int remaining = _state->batteryRemaining();
-    if (remaining < 0) return;   // 첫 SYS_STATUS 전
+    if (remaining < 0) return;   // before the first SYS_STATUS
 
-    // 임계점 (떨어지는 방향만 알림): 50 → 30 → 15 → 5 %
+    // Thresholds (only notify while dropping): 50 → 30 → 15 → 5 %
     static const int thresholds[] = {50, 30, 15, 5};
     for (int t : thresholds) {
         if (_lastBatteryThreshold > t && remaining <= t) {

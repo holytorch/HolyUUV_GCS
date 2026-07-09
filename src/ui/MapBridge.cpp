@@ -3,8 +3,8 @@
 
 // ─────────────────────────────────────────────────────────────────────────────
 // initCacheDir()
-// tileCachePath()가 가리키는 디렉토리가 없으면 생성한다.
-// MainWindow 초기화 시 QML 맵이 캐시를 쓰기 전에 호출된다.
+// Creates the directory that tileCachePath() points to if it does not exist.
+// Called during MainWindow initialization, before the QML map uses the cache.
 // ─────────────────────────────────────────────────────────────────────────────
 void MapBridge::initCacheDir() const {
     QDir().mkpath(tileCachePath());

@@ -9,22 +9,24 @@ class VehicleState;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // LogFeed
-// 두 소스에서 들어오는 로그를 통합해 QML로 노출:
-//   1) Qt 메시지 시스템 (qDebug/qInfo/qWarning/qCritical) — qInstallMessageHandler
-//      로 가로채서 터미널에 찍히는 모든 로그가 그대로 QML에도 들어감
-//   2) VehicleState 신호 — ARMED/MODE/LINK/GPS/BATTERY 등 상태 전이를
-//      사람이 읽기 좋은 라인으로 변환
+// Merges logs from two sources and exposes them to QML:
+//   1) The Qt message system (qDebug/qInfo/qWarning/qCritical) — intercepted with
+//      qInstallMessageHandler, so every log printed to the terminal also flows
+//      into QML.
+//   2) VehicleState signals — converts state transitions (ARMED/MODE/LINK/GPS/
+//      BATTERY, etc.) into human-readable lines.
 //
-// 노출:
-//   text       — 누적 로그(여러 줄). textChanged 신호로 QML이 자동 갱신.
-//   append()   — 외부에서 임의 라인 push
-//   clear()    — 비우기
+// Exposes:
+//   text       — the accumulated log (multi-line). QML refreshes automatically via
+//                textChanged.
+//   append()   — push an arbitrary line from outside
+//   clear()    — clear the feed
 //
-// 정책:
-//   - 라인 수가 MAX_LINES를 넘으면 오래된 것부터 drop (ring buffer)
-//   - 메시지 핸들러는 thread-safe하지 않은 곳에서도 호출될 수 있어
-//     QMetaObject::invokeMethod로 GUI 스레드 큐잉해서 push
-//   - 원래 핸들러도 그대로 호출 → 터미널에도 계속 찍힘
+// Policy:
+//   - once the line count exceeds MAX_LINES, the oldest are dropped (ring buffer)
+//   - the message handler may be invoked where it is not thread-safe, so lines are
+//     queued onto the GUI thread with QMetaObject::invokeMethod
+//   - the original handler is also invoked → the terminal keeps printing too
 // ─────────────────────────────────────────────────────────────────────────────
 class LogFeed : public QObject {
     Q_OBJECT
@@ -33,14 +35,15 @@ public:
     explicit LogFeed(QObject* parent = nullptr);
     ~LogFeed() override;
 
-    // VehicleState 신호 연결은 생성 후 따로 바인딩한다. LogFeed를 부팅 가장 앞에서
-    // 먼저 만들어 메시지 핸들러로 전체 부팅 로그를 캡처하기 위함 (그 시점엔 아직
-    // VehicleState가 생성 전일 수 있음).
+    // The VehicleState signal connections are bound separately after construction.
+    // LogFeed is created at the very start of boot so its message handler captures
+    // the entire boot log (at which point VehicleState may not exist yet).
     void bindVehicle(VehicleState* state);
 
     QString text() const { return _lines.join('\n'); }
 
-    // append/clear는 QML/외부 코드용. append는 QtMsgType 핸들러도 사용 (queued).
+    // append/clear are for QML/external code. append is also used by the QtMsgType
+    // handler (queued).
     Q_INVOKABLE void append(const QString& line);
     Q_INVOKABLE void clear();
 
@@ -58,8 +61,8 @@ private:
     QString _timestamp() const;
     void    _push(const QString& line);
 
-    // qInstallMessageHandler용. 멀티스레드에서 불릴 수 있으니
-    // 정적이고 _instance 통해 QMetaObject::invokeMethod로 GUI 스레드로 보낸다.
+    // For qInstallMessageHandler. It may be called from multiple threads, so it is
+    // static and routes to the GUI thread via _instance and QMetaObject::invokeMethod.
     static void _qtMessageHandler(QtMsgType type,
                                   const QMessageLogContext& ctx,
                                   const QString& msg);
@@ -71,7 +74,7 @@ private:
 
     static constexpr int MAX_LINES = 500;
 
-    // 상태 전이 추적 — 중복 로그 방지용
+    // State-transition tracking — to avoid duplicate log lines
     bool _hadGpsFix            = false;
     int  _lastBatteryThreshold = 101;
 };

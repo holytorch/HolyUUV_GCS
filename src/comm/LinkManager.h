@@ -6,9 +6,10 @@
 
 // ─────────────────────────────────────────────────────────────────────────────
 // LinkManager
-// 단일 활성 링크(UdpLink)를 소유하고 관리한다.
-// setLink()로 링크를 교체하면 이전 링크를 안전하게 해제한 뒤 새 링크를 연결한다.
-// ILink의 시그널을 그대로 재발신해 외부(Application)가 동일한 시그널을 사용할 수 있게 한다.
+// Owns and manages a single active link (UdpLink). Swapping the link via
+// setLink() safely tears down the previous one before connecting the new one.
+// It re-emits the ILink signals verbatim, so callers (Application) can subscribe
+// to the same set of signals regardless of the underlying link.
 // ─────────────────────────────────────────────────────────────────────────────
 class LinkManager : public QObject {
     Q_OBJECT

@@ -17,18 +17,22 @@
 #include <unistd.h>
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 파일 로깅: 콘솔(stderr)과 동시에 ~/.local/share/HolyUUV_GCS/logs/ 에 기록한다.
-//   - 파일명     : gcs_<yyyy-MM-dd>.log
-//   - 로테이션   : 파일이 kMaxBytes 초과 시 타임스탬프 붙여 보관 후 새 파일,
-//                  logs/ 디렉터리는 가장 최근 kMaxFiles 개만 유지
-//   - 쓰기       : ::write (버퍼 없음) — 크래시 직전 메시지도 유실되지 않음
-//   - 크래시 연동 : 같은 fd를 CrashHandler에 넘겨 백트레이스도 이 파일에 함께 남긴다
-// 메시지 핸들러는 여러 스레드에서 동시 호출될 수 있어 QMutex로 보호한다.
+// File logging: mirrors console (stderr) output into ~/.local/share/HolyUUV_GCS/logs/.
+//   - filename   : gcs_<yyyy-MM-dd>.log
+//   - rotation   : when a file exceeds kMaxBytes it is archived with a timestamp
+//                  suffix and a fresh file is opened; the logs/ directory keeps
+//                  only the kMaxFiles most recent files
+//   - writes     : ::write (unbuffered) — even the last message before a crash is
+//                  not lost
+//   - crash link : the same fd is handed to CrashHandler so backtraces are
+//                  recorded in this file too
+// The message handler may be invoked concurrently from multiple threads, so it is
+// guarded by a QMutex.
 // ─────────────────────────────────────────────────────────────────────────────
 namespace {
 
-constexpr qint64 kMaxBytes = 5 * 1024 * 1024;   // 파일당 5 MB
-constexpr int    kMaxFiles = 10;                // logs/ 보관 개수
+constexpr qint64 kMaxBytes = 5 * 1024 * 1024;   // 5 MB per file
+constexpr int    kMaxFiles = 10;                // files retained in logs/
 
 QMutex           g_mutex;
 int              g_fd          = -1;
@@ -41,11 +45,11 @@ QString activePath()
     return g_logDir + "/gcs_" + QDate::currentDate().toString("yyyy-MM-dd") + ".log";
 }
 
-// logs/ 에서 가장 최근 kMaxFiles 개만 남기고 오래된 파일 삭제.
+// Keep only the kMaxFiles most recent files in logs/, deleting older ones.
 void pruneOldLogs()
 {
     const QFileInfoList files = QDir(g_logDir).entryInfoList(
-        QStringList() << "gcs_*.log", QDir::Files, QDir::Time);   // 최신 우선
+        QStringList() << "gcs_*.log", QDir::Files, QDir::Time);   // newest first
     for (int i = kMaxFiles; i < files.size(); ++i)
         QFile::remove(files[i].absoluteFilePath());
 }
@@ -58,7 +62,8 @@ void openActive()
     g_written = (g_fd >= 0 && ::fstat(g_fd, &st) == 0) ? static_cast<qint64>(st.st_size) : 0;
 }
 
-// 용량 초과 시 현재 파일을 타임스탬프 붙여 보관하고 새 파일을 연다 (호출자가 g_mutex 보유).
+// When the file exceeds its size cap, archive it with a timestamp suffix and open
+// a fresh one (the caller holds g_mutex).
 void rotateIfNeeded()
 {
     if (g_fd < 0 || g_written < kMaxBytes) return;
@@ -68,7 +73,7 @@ void rotateIfNeeded()
         + QDateTime::currentDateTime().toString("yyyy-MM-dd_HHmmsszzz") + ".log";
     QFile::rename(activePath(), rolled);
     openActive();
-    CrashHandler::setLogFd(g_fd);   // 새 fd 로 갱신
+    CrashHandler::setLogFd(g_fd);   // update to the new fd
     pruneOldLogs();
 }
 
@@ -93,14 +98,14 @@ void Logger::init()
 {
     qSetMessagePattern("[%{time hh:mm:ss.zzz}] [%{type}] %{message}");
 
-    // applicationName("HolyUUV_GCS") 설정 후 호출되므로 → ~/.local/share/HolyUUV_GCS/logs
+    // Called after applicationName("HolyUUV_GCS") is set → ~/.local/share/HolyUUV_GCS/logs
     g_logDir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation) + "/logs";
     QDir().mkpath(g_logDir);
     pruneOldLogs();
     openActive();
 
     if (g_fd >= 0)
-        CrashHandler::setLogFd(g_fd);   // 크래시 백트레이스도 같은 파일에 기록
+        CrashHandler::setLogFd(g_fd);   // record crash backtraces in the same file
 
     g_prevHandler = qInstallMessageHandler(messageHandler);
 }

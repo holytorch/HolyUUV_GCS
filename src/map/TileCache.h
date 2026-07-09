@@ -11,21 +11,22 @@ class TileCacheWorker;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // TileCache
-// 타일 캐시의 메인 스레드 프록시. 실제 DB 작업은 별도 스레드의 TileCacheWorker가 수행한다.
+// The main-thread proxy for the tile cache. The actual DB work is performed by a
+// TileCacheWorker running on a separate thread.
 //
-// 캐시 계층:
-//   1순위: SQLite (최대 5 GB, LRU 자동 삭제)  — TileServer 관리
-//   2순위: CartoDB 원격 서버                   — SQLite 미스 시 다운로드 후 저장
+// Cache tiers:
+//   Tier 1: SQLite (up to 5 GB, LRU auto-eviction) — managed by TileServer
+//   Tier 2: CartoDB remote server                  — on a SQLite miss, downloaded then stored
 //
-// 사용 흐름:
+// Usage flow:
 //   TileServer.handleRequest()
-//     → TileCache.lookup()               (메인 스레드)
-//       → TileCacheWorker.lookup()       (DB 스레드, QueuedConnection)
-//         히트: tileFound  신호 → TileServer.onTileFound()  → 소켓 응답
-//         미스: tileMissed 신호 → TileServer.onTileMissed() → CartoDB 다운로드
+//     → TileCache.lookup()               (main thread)
+//       → TileCacheWorker.lookup()       (DB thread, QueuedConnection)
+//         hit:  tileFound  signal → TileServer.onTileFound()  → socket response
+//         miss: tileMissed signal → TileServer.onTileMissed() → CartoDB download
 //   TileServer.fetchAndCache()
-//     → TileCache.store()                (메인 스레드)
-//       → TileCacheWorker.store()        (DB 스레드)
+//     → TileCache.store()                (main thread)
+//       → TileCacheWorker.store()        (DB thread)
 // ─────────────────────────────────────────────────────────────────────────────
 class TileCache : public QObject {
     Q_OBJECT
@@ -40,7 +41,7 @@ signals:
     void tileFound(QPointer<QTcpSocket> socket, const QByteArray& data);
     void tileMissed(QPointer<QTcpSocket> socket, const QString& key, const QString& url);
 
-    // 내부 전용: 메인 → 워커 (QueuedConnection 자동 적용)
+    // Internal only: main → worker (QueuedConnection applied automatically)
     void _doInit(const QString& dbPath);
     void _doLookup(const QString& key, QPointer<QTcpSocket> socket, const QString& url);
     void _doStore(const QString& key, const QByteArray& data);

@@ -53,7 +53,8 @@ void ConnectionBridge::addDetectedSysid(int sysid)
 {
     if (_detectedSysids.contains(sysid)) return;
     _detectedSysids.append(sysid);
-    // 감지된 차량은 통신 강도 max로 시작 (HEARTBEAT 받았으니 연결 OK)
+    // A newly detected vehicle starts at maximum signal strength (a HEARTBEAT was
+    // received, so the link is OK).
     _slots[sysid].signalLevel = 3;
     emit detectedSysidsChanged();
     emit vehiclesInfoChanged();
@@ -90,7 +91,7 @@ void ConnectionBridge::setActiveSysidMirror(int sysid)
 }
 
 
-// 모든 sysid의 SYS_STATUS 수신 시 호출 (활성 필터 없음). 슬롯에 저장.
+// Called on SYS_STATUS from any sysid (no active filter). Stores it in the slot.
 void ConnectionBridge::onAnyVehicleSysStatus(int sysid, int batteryRemaining, float voltage)
 {
     auto& slot = _slots[sysid];

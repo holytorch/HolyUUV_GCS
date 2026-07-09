@@ -12,29 +12,30 @@
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Application
-// GCS의 최상위 컨트롤러. 모든 하위 시스템(통신·MAVLink·차량 상태·타일·UI)을
-// 소유하고 시그널/슬롯으로 연결한다.
+// The top-level controller of the GCS. It owns every subsystem (communication,
+// MAVLink, vehicle state, tiles, UI) and wires them together with signals/slots.
 //
-// 실행 흐름:
+// Execution flow:
 //   main()
-//   └─ Application::initialize()  — 시스템 연결, 링크 감지, 창 표시
-//   └─ Application::run()         — Qt 이벤트 루프 진입 (블로킹)
-//   └─ Application::shutdown()    — 종료 정리
+//   └─ Application::initialize()  — wire subsystems, detect links, show the window
+//   └─ Application::run()         — enter the Qt event loop (blocking)
+//   └─ Application::shutdown()    — teardown on exit
 //
-// 소유 구조:
+// Ownership:
 //   Application
-//   ├── LinkManager    — Serial / UDP 링크 전환 및 바이트 수신
-//   ├── MavlinkManager — 바이트 스트림 → MAVLink 메시지 파싱
-//   ├── VehicleState   — 파싱된 텔레메트리 저장 및 변경 알림
-//   ├── TileCache      — SQLite 타일 캐시 (5 GB LRU)
-//   ├── TileServer     — 로컬 HTTP 타일 프록시 (127.0.0.1:17777)
-//   └── MainWindow     — 메인 UI 창
+//   ├── LinkManager    — switches Serial / UDP links and receives bytes
+//   ├── MavlinkManager — parses the byte stream into MAVLink messages
+//   ├── VehicleState   — stores parsed telemetry and notifies on change
+//   ├── TileCache      — SQLite tile cache (5 GB LRU)
+//   ├── TileServer     — local HTTP tile proxy (127.0.0.1:17777)
+//   └── MainWindow     — the main UI window
 // ─────────────────────────────────────────────────────────────────────────────
 class Application : public QObject {
     Q_OBJECT
 public:
-    // explicit 의도한 생성자만 허용 (예: 부모 QObject*), 암시적 변환 방지
-    //QObject : 부모, Application : 상속받은 자식
+    // 'explicit' allows only the intended constructor (e.g. with a parent
+    // QObject*) and prevents implicit conversions.
+    // QObject: the parent; Application: the derived child.
     explicit Application(QObject* parent = nullptr);
 
     bool initialize();
@@ -42,13 +43,15 @@ public:
     void shutdown();
 
 private:
-    // Application이 생성될 때, 자동으로 같이 생성자 실행됨.
-    // _logFeed를 가장 먼저 선언 → 가장 먼저 생성되어 메시지 핸들러를 설치하고,
-    // 이후 모든 객체의 [init]/[exit] 로그를 인앱 피드까지 캡처한다.
+    // When Application is constructed, these members are constructed with it.
+    // _logFeed is declared first → constructed first → installs its message
+    // handler first, capturing the [init]/[exit] logs of every subsequent object
+    // in the in-app feed as well.
     LogFeed        _logFeed;
     LinkManager    _linkManager;
     MavlinkManager _mavlinkManager;
-    // 다중로봇 단일 진실원천 — sysid별 VehicleState 소유 (RAII: parent-child)
+    // Single source of truth for multi-robot — owns a VehicleState per sysid
+    // (RAII via the QObject parent-child relationship).
     VehicleManager _vehicleManager;
     TileCache      _tileCache;
     TileServer     _tileServer{&_tileCache};

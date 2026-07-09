@@ -9,14 +9,14 @@
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ConnectionBridge
-// QML ↔ LinkManager + MavlinkManager 송수신 브리지.
-//   - QML이 호스트/포트로 UDP 연결 요청 → Application이 LinkManager에 전달
-//   - LinkManager 상태 → 이 브리지의 connected 프로퍼티에 반영
-//   - MavlinkManager가 감지한 sysid 목록 + 활성 sysid를 mirror해 QML에 노출
-//   - QML이 sysid 선택 → MavlinkManager::setActiveSysid로 전달
+// A QML ↔ LinkManager + MavlinkManager transmit/receive bridge.
+//   - QML requests a UDP connection by host/port → Application forwards it to LinkManager
+//   - LinkManager state → reflected in this bridge's connected property
+//   - Mirrors the sysid list detected by MavlinkManager + the active sysid to QML
+//   - QML selects a sysid → forwarded to MavlinkManager::setActiveSysid
 //
-// Phase 1: 한 번에 한 연결만 활성 (LinkManager single-link).
-// 다음 connectUdp 호출 시 기존 연결은 자동 해제 후 새로 연결.
+// Phase 1: only one connection is active at a time (LinkManager single-link).
+// The next connectUdp call automatically tears down the existing connection first.
 // ─────────────────────────────────────────────────────────────────────────────
 class ConnectionBridge : public QObject {
     Q_OBJECT
@@ -25,8 +25,8 @@ class ConnectionBridge : public QObject {
     Q_PROPERTY(int          currentPort     READ currentPort     NOTIFY currentEndpointChanged)
     Q_PROPERTY(QVariantList  detectedSysids READ detectedSysids  NOTIFY detectedSysidsChanged)
     Q_PROPERTY(int          activeSysid     READ activeSysid     NOTIFY activeSysidChanged)
-    // sysid별 텔레메트리 슬롯 (카드 표시용) — 활성 차량 무관, 모든 감지된 차량의 정보
-    // 각 항목: { sysid, batteryRemaining, voltage, signalLevel }
+    // Per-sysid telemetry slots (for the cards) — independent of the active vehicle,
+    // covering every detected vehicle. Each entry: { sysid, batteryRemaining, voltage, signalLevel }
     Q_PROPERTY(QVariantList  vehiclesInfo   READ vehiclesInfo    NOTIFY vehiclesInfoChanged)
 public:
     explicit ConnectionBridge(QObject* parent = nullptr);
@@ -41,18 +41,20 @@ public:
 
     Q_INVOKABLE void connectUdp(const QString& host, int port);
     Q_INVOKABLE void disconnectLink();
-    // QML이 트리에서 sysid 클릭 시 호출. MavlinkManager로 전달돼 active 변경.
+    // Called when QML clicks a sysid in the tree. Forwarded to MavlinkManager to
+    // change the active vehicle.
     Q_INVOKABLE void setActiveSysid(int sysid);
 
-    // Application 측에서 LinkManager/MavlinkManager 상태 변화를 미러
+    // Application side mirrors LinkManager/MavlinkManager state changes
     void setConnected(bool c);
     void addDetectedSysid(int sysid);
-    void removeDetectedSysid(int sysid);   // 타임아웃된 차량 카드 제거
+    void removeDetectedSysid(int sysid);   // remove a timed-out vehicle's card
     void clearDetectedSysids();
-    void setActiveSysidMirror(int sysid);   // emit만 (실제 변경은 MavlinkManager가)
+    void setActiveSysidMirror(int sysid);   // emit only (MavlinkManager applies the actual change)
 
 public slots:
-    // 모든 sysid의 SYS_STATUS 업데이트 (MavlinkManager가 호출). 슬롯 갱신 후 vehiclesInfoChanged emit.
+    // Update from any sysid's SYS_STATUS (called by MavlinkManager). Updates the slot
+    // then emits vehiclesInfoChanged.
     void onAnyVehicleSysStatus(int sysid, int batteryRemaining, float voltage);
 
 signals:

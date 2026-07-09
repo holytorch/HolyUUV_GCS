@@ -4,13 +4,13 @@
 
 // ─────────────────────────────────────────────────────────────────────────────
 // TerrainTile
-// 3D 지형 메시 생성에 사용되는 2D 높이 배열 데이터.
-// heights[row * width + col] 형태로 저장된다.
+// A 2D height-array used to build a 3D terrain mesh.
+// Stored as heights[row * width + col].
 //
-// 좌표 규약:
-//   col(x) — 서→동 방향 (3D X축)
-//   row(y) — 북→남 방향 (3D Z축)
-//   높이값: 육지 = LAND_H(+1.0), 수역 = SEA_DEPTH(−1000.0)
+// Coordinate convention:
+//   col(x) — west→east (3D X axis)
+//   row(y) — north→south (3D Z axis)
+//   height value: land = LAND_H (+1.0), water = SEA_DEPTH (−1000.0)
 // ─────────────────────────────────────────────────────────────────────────────
 struct TerrainTile {
     int tileZ = 0;

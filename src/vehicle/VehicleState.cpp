@@ -2,8 +2,8 @@
 #include <QTimer>
 #include <QDebug>
 
-// ArduSub flight mode 번호 → 문자열 테이블
-// customMode 필드 값 기준 (ArduSub 4.x 기준)
+// ArduSub flight-mode number → string table.
+// Keyed by the customMode field value (ArduSub 4.x).
 static const char* arduSubModeName(uint32_t mode)
 {
     switch (mode) {
@@ -22,8 +22,8 @@ static const char* arduSubModeName(uint32_t mode)
 
 // ─────────────────────────────────────────────────────────────────────────────
 // VehicleState()
-// heartbeat 감시 타이머를 생성한다. 3초 이상 heartbeat가 없으면
-// _heartbeatOk를 false로 설정하고 heartbeatStatusChanged를 발신한다.
+// Creates the heartbeat watchdog timer. If no heartbeat arrives for more than
+// 3 seconds, _heartbeatOk is set to false and heartbeatStatusChanged is emitted.
 // ─────────────────────────────────────────────────────────────────────────────
 VehicleState::VehicleState(QObject* parent) : QObject(parent)
 {
@@ -42,7 +42,8 @@ VehicleState::VehicleState(QObject* parent) : QObject(parent)
 }
 
 
-// sysid를 생성 시 바인딩. 기본 생성자에 위임해 watchdog 설정을 재사용한다.
+// Binds the sysid at construction. Delegates to the default constructor to reuse
+// the watchdog setup.
 VehicleState::VehicleState(int sysid, QObject* parent)
     : VehicleState(parent)
 {
@@ -61,8 +62,8 @@ VehicleState::~VehicleState()
 
 // ─────────────────────────────────────────────────────────────────────────────
 // updateBattery()
-// SYS_STATUS 메시지 파싱 결과를 저장하고 batteryChanged를 발신한다.
-// current는 cA(센티암페어) 단위로 수신되며 표시 시 /100으로 변환한다.
+// Stores the parsed SYS_STATUS values and emits batteryChanged. current is
+// received in cA (centiamperes) and converted (/100) for display.
 // ─────────────────────────────────────────────────────────────────────────────
 void VehicleState::updateBattery(int remaining, float voltage, float current,
                                   uint16_t dropRate, uint16_t errorsComm)
@@ -87,7 +88,7 @@ void VehicleState::updateRadioStatus(uint8_t rssi, uint8_t remRssi)
 
 // ─────────────────────────────────────────────────────────────────────────────
 // updateAttitude()
-// ATTITUDE 메시지 파싱 결과(rad)를 저장하고 attitudeChanged를 발신한다.
+// Stores the parsed ATTITUDE values (rad) and emits attitudeChanged.
 // ─────────────────────────────────────────────────────────────────────────────
 void VehicleState::updateAttitude(float roll, float pitch, float yaw)
 {
@@ -100,8 +101,8 @@ void VehicleState::updateAttitude(float roll, float pitch, float yaw)
 
 // ─────────────────────────────────────────────────────────────────────────────
 // updateVfrHud()
-// VFR_HUD 메시지 파싱 결과를 저장하고 vfrHudChanged를 발신한다.
-// depth는 altitude 그대로 저장 (수중 로봇에서 음수 = 수심, UI에서 부호 반전).
+// Stores the parsed VFR_HUD values and emits vfrHudChanged. depth is stored as the
+// raw altitude (for an underwater vehicle, negative = depth; the UI flips the sign).
 // ─────────────────────────────────────────────────────────────────────────────
 void VehicleState::updateVfrHud(float groundspeed, float depth, float heading, int throttle)
 {
@@ -115,7 +116,7 @@ void VehicleState::updateVfrHud(float groundspeed, float depth, float heading, i
 
 // ─────────────────────────────────────────────────────────────────────────────
 // updateGlobalPosition()
-// GLOBAL_POSITION_INT 메시지 파싱 결과를 저장하고 gpsChanged를 발신한다.
+// Stores the parsed GLOBAL_POSITION_INT values and emits gpsChanged.
 // ─────────────────────────────────────────────────────────────────────────────
 void VehicleState::updateGlobalPosition(double lat, double lon)
 {
@@ -127,7 +128,7 @@ void VehicleState::updateGlobalPosition(double lat, double lon)
 
 // ─────────────────────────────────────────────────────────────────────────────
 // updateGpsRaw()
-// GPS_RAW_INT 메시지 파싱 결과를 저장하고 gpsChanged를 발신한다.
+// Stores the parsed GPS_RAW_INT values and emits gpsChanged.
 // ─────────────────────────────────────────────────────────────────────────────
 void VehicleState::updateGpsRaw(int satCount, float hdop)
 {
@@ -139,10 +140,10 @@ void VehicleState::updateGpsRaw(int satCount, float hdop)
 
 // ─────────────────────────────────────────────────────────────────────────────
 // updateHeartbeat()
-// HEARTBEAT 메시지 파싱 결과를 저장한다.
+// Stores the parsed HEARTBEAT values.
 // armed: baseMode & MAV_MODE_FLAG_SAFETY_ARMED (0x80)
-// customMode: ArduSub 비행 모드 번호 → 문자열로 변환
-// 수신마다 _heartbeatElapsed를 리셋해 watchdog가 연결 상태를 감지한다.
+// customMode: ArduSub flight-mode number → converted to a string
+// Each message restarts _heartbeatElapsed so the watchdog can track connectivity.
 // ─────────────────────────────────────────────────────────────────────────────
 void VehicleState::updateHeartbeat(bool armed, uint32_t customMode)
 {
@@ -168,8 +169,8 @@ void VehicleState::updateHeartbeat(bool armed, uint32_t customMode)
 
 // ─────────────────────────────────────────────────────────────────────────────
 // setSysid()
-// MavlinkManager가 첫 HEARTBEAT에서 sysid를 latch하면 호출.
-// 사용자가 트리에서 다른 sysid 선택해도 호출되어 UI가 그 차량으로 mirror됨.
+// Called when MavlinkManager latches the sysid on the first HEARTBEAT. Also called
+// when the user selects a different sysid in the tree, so the UI mirrors that vehicle.
 // ─────────────────────────────────────────────────────────────────────────────
 void VehicleState::setSysid(int sysid)
 {
@@ -181,9 +182,9 @@ void VehicleState::setSysid(int sysid)
 
 // ─────────────────────────────────────────────────────────────────────────────
 // resetTelemetry()
-// 연결 해제 / 활성 차량 전환 시 호출. 모든 텔레메트리를 초기값으로 되돌려
-// stale 표시(예: 이전 차량 batt %)가 남지 않도록 한다.
-// sysid는 별도 setSysid로 관리.
+// Called on disconnect / active-vehicle switch. Restores all telemetry to defaults
+// so no stale values remain (e.g. the previous vehicle's battery %).
+// The sysid is managed separately via setSysid.
 // ─────────────────────────────────────────────────────────────────────────────
 void VehicleState::resetTelemetry()
 {

@@ -12,7 +12,7 @@ LinkManager::LinkManager(QObject* parent) : QObject(parent)
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ~LinkManager()
-// 소멸 시 활성 링크를 안전하게 해제한다.
+// Safely tears down the active link on destruction.
 // ─────────────────────────────────────────────────────────────────────────────
 LinkManager::~LinkManager()
 {
@@ -23,9 +23,11 @@ LinkManager::~LinkManager()
 
 // ─────────────────────────────────────────────────────────────────────────────
 // setLink()
-// 이전 링크가 있으면 먼저 해제한 뒤 새 링크의 소유권을 넘겨받는다.
-// ILink의 시그널을 LinkManager 시그널로 중계하도록 연결하고 connectLink()를 호출한다.
-// 반환값: connectLink() 결과 (포트 열기·소켓 바인딩 성공 여부).
+// Tears down any existing link first, then takes ownership of the new one.
+// Wires the ILink signals to be relayed as LinkManager signals and calls
+// connectLink().
+// Returns: the result of connectLink() (whether opening the port / binding the
+// socket succeeded).
 // ─────────────────────────────────────────────────────────────────────────────
 bool LinkManager::setLink(std::unique_ptr<ILink> link)
 {
@@ -43,7 +45,7 @@ bool LinkManager::setLink(std::unique_ptr<ILink> link)
 
 // ─────────────────────────────────────────────────────────────────────────────
 // removeLink()
-// 현재 링크를 연결 해제하고 삭제한다.
+// Disconnects and deletes the current link.
 // ─────────────────────────────────────────────────────────────────────────────
 void LinkManager::removeLink()
 {
@@ -56,7 +58,7 @@ void LinkManager::removeLink()
 
 // ─────────────────────────────────────────────────────────────────────────────
 // isConnected()
-// 활성 링크가 있고 연결된 상태이면 true를 반환한다.
+// Returns true when an active link exists and is connected.
 // ─────────────────────────────────────────────────────────────────────────────
 bool LinkManager::isConnected() const
 {
@@ -66,7 +68,7 @@ bool LinkManager::isConnected() const
 
 // ─────────────────────────────────────────────────────────────────────────────
 // sendBytes()
-// 활성 링크로 데이터를 전송한다. 링크가 없으면 false를 반환한다.
+// Sends data over the active link. Returns false when there is no link.
 // ─────────────────────────────────────────────────────────────────────────────
 bool LinkManager::sendBytes(const QByteArray& data)
 {

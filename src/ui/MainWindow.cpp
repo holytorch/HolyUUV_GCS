@@ -11,19 +11,19 @@ MainWindow::MainWindow(VehicleManager* vehicles, LogFeed* logFeed, QWidget* pare
 {
     setWindowTitle("HolyUUV GCS");
     resize(1600, 900);
-    setMinimumSize(1280, 960);   // 이 이하로는 축소 불가 (레이아웃 깨짐 방지)
+    setMinimumSize(1280, 960);   // cannot be shrunk below this (prevents layout breakage)
     statusBar()->hide();
     _setupUi();
 
-    // 활성 차량 전환 → vehicle 노출 + 맵 중심/청크 포커스 재바인딩
+    // Active-vehicle switch → expose 'vehicle' + rebind map center / chunk focus
     connect(_vehicles, &VehicleManager::activeVehicleChanged,
             this, &MainWindow::_onActiveVehicleChanged);
-    // 차량 추가/제거 → 3D 마커(sysid별) 연결/해제
+    // Vehicle added/removed → connect/disconnect the per-sysid 3D marker
     connect(_vehicles, &VehicleManager::vehicleAdded,
             this, &MainWindow::_onVehicleAdded);
     connect(_vehicles, &VehicleManager::vehicleRemoved,
             this, &MainWindow::_onVehicleRemoved);
-    _onActiveVehicleChanged();   // 초기 상태 (보통 아직 차량 없음 → vehicle=null)
+    _onActiveVehicleChanged();   // initial state (usually no vehicle yet → vehicle=null)
 
     qInfo("[init] MainWindow");
 }
@@ -50,7 +50,7 @@ void MainWindow::_setupUi()
     _qmlCtx->setContextProperty("logFeed",           _logFeed);
     _qmlCtx->setContextProperty("commander",         _commander);
     _qmlCtx->setContextProperty("connection",        _connection);
-    // 다중로봇: 차량 리스트 모델 + 현재 활성 차량
+    // Multi-robot: the vehicle list model + the currently active vehicle
     _qmlCtx->setContextProperty("vehicleManager",    _vehicles);
     _qmlCtx->setContextProperty("vehicle",           _vehicles->activeVehicle());
     mainWidget->setSource(QUrl("qrc:/qml/MainView.qml"));
@@ -60,29 +60,32 @@ void MainWindow::_setupUi()
 }
 
 
-// 활성 차량 전환: 비파괴적 — 모든 차량 데이터·마커는 유지되고, 화면이 "보는/조종하는"
-// 대상만 바뀐다. 여기선 (1) QML vehicle 노출, (2) 2D 맵 자동중심(활성),
-// (3) 3D 청크/카메라 포커스를 활성 차량으로 전환한다. (3D 마커 자체는 차량별 연결이 담당)
+// Active-vehicle switch: non-destructive — all vehicle data and markers are kept,
+// and only the target being "viewed/controlled" changes. Here it (1) exposes the
+// QML 'vehicle', (2) auto-centers the 2D map on the active vehicle, and (3) moves
+// the 3D chunk/camera focus to it. (The 3D markers themselves are handled by the
+// per-vehicle connections.)
 void MainWindow::_onActiveVehicleChanged()
 {
-    // 이전 활성 차량의 시그널 연결 해제 (네트워크 아님 — 시그널/슬롯만)
+    // Disconnect the previous active vehicle's signals (signal/slot only — nothing network-related)
     for (const auto& c : _activeVehicleConns)
         disconnect(c);
     _activeVehicleConns.clear();
 
     VehicleState* v = _vehicles->activeVehicle();
 
-    // QML의 단일 'vehicle' 바인딩을 새 활성 차량으로 갱신 (컨트롤센터/마커 강조 공용)
+    // Update QML's single 'vehicle' binding to the new active vehicle (shared by the
+    // control center / marker highlight)
     if (_qmlCtx)
         _qmlCtx->setContextProperty("vehicle", static_cast<QObject*>(v));
 
-    // 3D 청크/카메라가 추종할 활성 차량 지정
+    // Set which active vehicle the 3D chunks/camera follow
     if (_mainTerrainScene)
         _mainTerrainScene->setActiveSysid(_vehicles->activeSysid());
 
     if (!v) return;
 
-    // 활성 차량: 2D 맵 자동중심 + 청크 전방 우선 로딩용 heading
+    // Active vehicle: auto-center the 2D map + heading for forward-priority chunk loading
     _activeVehicleConns << connect(v, &VehicleState::gpsChanged,
                                    this, &MainWindow::onGpsChanged);
     _activeVehicleConns << connect(v, &VehicleState::vfrHudChanged,
@@ -92,8 +95,9 @@ void MainWindow::_onActiveVehicleChanged()
 }
 
 
-// 새 차량 → 그 차량의 위치/수심/yaw 시그널을 sysid별 3D 마커에 연결한다.
-// (VehicleState가 제거되면 Qt가 연결을 자동 해제하므로 수동 추적 불필요)
+// New vehicle → connect its position/depth/yaw signals to the per-sysid 3D marker.
+// (When the VehicleState is removed, Qt drops the connections automatically, so no
+// manual tracking is needed.)
 void MainWindow::_onVehicleAdded(int sysid)
 {
     VehicleState* v = _vehicles->vehicle(sysid);
@@ -104,15 +108,15 @@ void MainWindow::_onVehicleAdded(int sysid)
         ts->updateVehiclePosition(sysid, v->latitude(), v->longitude());
     });
     connect(v, &VehicleState::vfrHudChanged, this, [ts, v, sysid]() {
-        const float d = -v->depth();              // 수면 아래 음수 → 양수 깊이(m)
+        const float d = -v->depth();              // below-surface negative → positive depth (m)
         ts->updateVehicleDepth(sysid, d > 0.0f ? d : 0.0f);
     });
     connect(v, &VehicleState::attitudeChanged, this, [ts, v, sysid]() {
-        // +90°: DAVE 시뮬 yaw 프레임 보정 (2D 마커와 동일)
+        // +90°: correction for the DAVE simulator's yaw frame (same as the 2D marker)
         ts->setVehicleYaw(sysid, v->yaw() * 180.0 / M_PI + 90.0);
     });
 
-    // 이미 들어와 있는 값으로 즉시 1회 갱신 (없으면 0,0 → 내부에서 무시)
+    // Update once immediately with the values already received (if none, 0,0 → ignored internally)
     ts->updateVehiclePosition(sysid, v->latitude(), v->longitude());
     const float d = -v->depth();
     ts->updateVehicleDepth(sysid, d > 0.0f ? d : 0.0f);
@@ -127,7 +131,7 @@ void MainWindow::_onVehicleRemoved(int sysid)
 }
 
 
-// 활성 차량 2D 맵 자동중심 (MapBridge → QML 맵 panTo)
+// Auto-center the 2D map on the active vehicle (MapBridge → QML map panTo)
 void MainWindow::onGpsChanged()
 {
     VehicleState* v = _vehicles->activeVehicle();
@@ -136,7 +140,8 @@ void MainWindow::onGpsChanged()
 }
 
 
-// 활성 차량 heading → 3D 청크 전방 우선 로딩 (수심·yaw 마커는 차량별 연결이 담당)
+// Active vehicle heading → forward-priority 3D chunk loading (depth/yaw markers are
+// handled by the per-vehicle connections)
 void MainWindow::onDepthChanged()
 {
     VehicleState* v = _vehicles->activeVehicle();

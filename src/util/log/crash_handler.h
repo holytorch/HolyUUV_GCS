@@ -2,22 +2,26 @@
 
 // ─────────────────────────────────────────────────────────────────────────────
 // CrashHandler
-// 크래시 시그널(SIGSEGV/SIGABRT/SIGFPE/SIGBUS/SIGILL)과 미처리 C++ 예외
-// (std::terminate)를 가로채, 죽기 직전에 백트레이스를 안전하게 stderr로 덤프한다.
+// Intercepts fatal signals (SIGSEGV / SIGABRT / SIGFPE / SIGBUS / SIGILL) and
+// unhandled C++ exceptions (std::terminate), dumping a backtrace safely to
+// stderr just before the process dies.
 //
-// 안전성:
-//   시그널 핸들러 안에서는 async-signal-safe 함수만 호출해야 한다
-//   (malloc/printf/qInfo 등은 데드락·재크래시 위험). 따라서 write()와
-//   backtrace_symbols_fd()만 사용한다. install()에서 backtrace()를 한 번
-//   미리 호출해 libgcc lazy-load(malloc 유발)를 워밍업한다.
+// Safety:
+//   Only async-signal-safe functions may be called from within a signal handler
+//   (malloc / printf / qInfo, etc. risk deadlock or a secondary crash). This
+//   handler therefore uses only write() and backtrace_symbols_fd(). install()
+//   invokes backtrace() once up front to warm up libgcc's lazy loading (which
+//   would otherwise trigger malloc in the signal context).
 //
-// 덤프 후에는 기본 핸들러로 복구해 재전달 → 코어덤프 생성 + 정상 종료 경로 유지.
+// After dumping, the default handler is restored and the signal re-raised, so a
+// core dump is produced and the normal termination path is preserved.
 // ─────────────────────────────────────────────────────────────────────────────
 namespace CrashHandler {
     void install();
 
-    // 크래시 백트레이스를 stderr 외에 이 파일 디스크립터에도 함께 덤프한다.
-    // Logger::init()이 로그 파일을 연 뒤 그 fd를 넘겨준다 (음수면 파일 덤프 생략).
-    // ::write / backtrace_symbols_fd 만 쓰므로 async-signal-safe 가 유지된다.
+    // Also dump the crash backtrace to this file descriptor, in addition to
+    // stderr. Logger::init() opens the log file and passes its fd here (a
+    // negative value skips the file dump). Only ::write / backtrace_symbols_fd
+    // are used, so async-signal-safety is preserved.
     void setLogFd(int fd);
 }

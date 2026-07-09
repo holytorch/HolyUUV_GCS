@@ -5,14 +5,14 @@
 
 // ─────────────────────────────────────────────────────────────────────────────
 // MapBridge
-// C++ ↔ QML 브릿지 객체. QML의 MapView / VoyagerView에서 차량 위치와
-// 타일 캐시 경로에 접근할 수 있도록 Q_PROPERTY로 노출한다.
+// A C++ ↔ QML bridge object. Exposes the vehicle position and tile-cache path via
+// Q_PROPERTY so QML's MapView / VoyagerView can access them.
 //
-// QML에서의 사용:
-//   bridge.latitude, bridge.longitude — 차량 위치 (GPS 수신 후 갱신)
-//   bridge.hasPosition                — GPS 수신 여부
-//   bridge.mapCenterLat/Lon           — 사용자가 맵을 이동할 때 QML이 호출로 갱신
-//   bridge.tileCachePath              — Qt Location 파일 캐시 기본 경로
+// Usage from QML:
+//   bridge.latitude, bridge.longitude — vehicle position (updated after a GPS fix)
+//   bridge.hasPosition                — whether a GPS fix has been received
+//   bridge.mapCenterLat/Lon           — updated by QML when the user pans the map
+//   bridge.tileCachePath              — default path for the Qt Location file cache
 // ─────────────────────────────────────────────────────────────────────────────
 class MapBridge : public QObject {
     Q_OBJECT
@@ -47,7 +47,8 @@ public:
         emit mapCenterChanged();
     }
 
-    // QML 맵 모드("osm" / "voyager" / "3d") 변경 알림. Mission 탭 3D 스택 토글에 사용.
+    // Notifies a QML map-mode change ("osm" / "voyager" / "3d"). Used by the
+    // Mission tab's 3D-stack toggle.
     Q_INVOKABLE void setMapMode(const QString& mode) {
         if (_mapMode == mode) return;
         _mapMode = mode;

@@ -7,19 +7,20 @@
 
 // ─────────────────────────────────────────────────────────────────────────────
 // VehicleState
-// MAVLink 메시지에서 파싱된 모든 차량 텔레메트리를 저장하고 변경 알림을 발신한다.
-// MavlinkManager가 update*() 슬롯을 호출하고, MainWindow(QML)이 신호를 받아 UI를 갱신한다.
+// Stores all vehicle telemetry parsed from MAVLink messages and emits change
+// notifications. MavlinkManager calls the update*() slots, and MainWindow (QML)
+// reacts to the signals to refresh the UI.
 //
-// 데이터 그룹:
-//   배터리   — SYS_STATUS 메시지
-//   자세     — ATTITUDE 메시지 (rad)
-//   항법     — VFR_HUD 메시지 (altitude = 수심, 음수)
-//   GPS      — GLOBAL_POSITION_INT + GPS_RAW_INT 메시지
-//   비행상태 — HEARTBEAT 메시지 (armed, 비행모드, 연결 감시)
+// Data groups:
+//   Battery   — SYS_STATUS message
+//   Attitude  — ATTITUDE message (rad)
+//   Navigation— VFR_HUD message (altitude = depth, negative)
+//   GPS       — GLOBAL_POSITION_INT + GPS_RAW_INT messages
+//   Flight    — HEARTBEAT message (armed, flight mode, connection watchdog)
 // ─────────────────────────────────────────────────────────────────────────────
 class VehicleState : public QObject {
     Q_OBJECT
-    // QML 바인딩용 — getter 시그니처는 그대로 두고 어노테이션만 추가.
+    // For QML binding — the getter signatures are unchanged, only annotations added.
     Q_PROPERTY(int     sysid            READ sysid            NOTIFY sysidChanged)
     Q_PROPERTY(int     batteryRemaining READ batteryRemaining NOTIFY batteryChanged)
     Q_PROPERTY(float   voltage          READ voltage          NOTIFY batteryChanged)
@@ -51,8 +52,9 @@ class VehicleState : public QObject {
 
 public:
     explicit VehicleState(QObject* parent = nullptr);
-    // 다중로봇: 로봇 1대당 객체 1개. sysid는 생성 시 고정되고, 연결 해제/타임아웃 시
-    // 이 객체째로 삭제된다 (객체 수명 = 로봇 존재 기간). 번호를 갈아끼우지 않음.
+    // Multi-robot: one object per robot. The sysid is fixed at construction, and
+    // on disconnect/timeout the whole object is deleted (object lifetime = the
+    // robot's lifetime). The number is never re-assigned.
     explicit VehicleState(int sysid, QObject* parent = nullptr);
     ~VehicleState() override;
 
@@ -93,7 +95,8 @@ public slots:
     void updateGpsRaw(int satCount, float hdop);
     void updateHeartbeat(bool armed, uint32_t customMode);
     void updateRadioStatus(uint8_t rssi, uint8_t remRssi);
-    // 활성 차량이 바뀌면 호출. 모든 telemetry를 초기값으로 리셋해 stale 표시 방지.
+    // Called when the active vehicle changes. Resets all telemetry to defaults to
+    // avoid showing stale values.
     void setSysid(int sysid);
     void resetTelemetry();
 
@@ -109,7 +112,7 @@ signals:
     void sysidChanged();
 
 private:
-    int    _sysid            = 0;   // 0 = 미정 (HEARTBEAT 받기 전)
+    int    _sysid            = 0;   // 0 = undetermined (before the first HEARTBEAT)
 
     int    _batteryRemaining = -1;
     float  _voltage          = 0.0f;

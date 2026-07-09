@@ -2,7 +2,8 @@
 #include "util/log/logger.h"
 #include <QList>
 
-// 차량 HEARTBEAT가 이 시간(ms) 이상 끊기면 타임아웃 처리 (그 차량만 제거).
+// A vehicle whose HEARTBEAT has been silent for at least this long (ms) is timed
+// out (only that vehicle is removed).
 static constexpr qint64 kVehicleTimeoutMs = 5000;
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -25,7 +26,7 @@ MavlinkManager::MavlinkManager(QObject* parent) : QObject(parent)
 #endif
     });
 
-    // per-vehicle 워치독 — 1초마다 각 차량의 마지막 HEARTBEAT를 점검.
+    // Per-vehicle watchdog — checks each vehicle's last HEARTBEAT once per second.
     _uptime.start();
     _vehicleSweep = new QTimer(this);
     _vehicleSweep->setInterval(1000);
@@ -46,29 +47,30 @@ MavlinkManager::~MavlinkManager()
 
 // ─────────────────────────────────────────────────────────────────────────────
 // parseBytes()
-// 수신 바이트를 한 바이트씩 MAVLink 파서에 공급한다.
-// 완전한 패킷이 완성되면 메시지 ID에 따라 해당 시그널을 발신한다.
-// MAVLINK_AVAILABLE이 정의되지 않은 빌드에서는 데이터를 무시한다.
+// Feeds the received bytes into the MAVLink parser one byte at a time. When a
+// complete packet is assembled, the corresponding signal is emitted based on the
+// message ID. In builds where MAVLINK_AVAILABLE is not defined, the data is ignored.
 // ─────────────────────────────────────────────────────────────────────────────
 void MavlinkManager::parseBytes(const QByteArray& data)
 {
 #ifdef MAVLINK_AVAILABLE
-    // MAVLink 패킷 구조: [STX(1byte)][LEN(1)][SEQ(1)][SYS(1)][COMP(1)][MSGID(1)][PAYLOAD(LEN)][CRC(2)]
-    // 1바이트씩 파서에 공급하는 이유:
-    //   - UDP 패킷 하나에 MAVLink 메시지 여러 개가 붙어올 수 있음
-    //   - 파서가 내부 버퍼에 바이트를 쌓다가 패킷이 완성되면 true 반환
-    //   - STX(0xFD/0xFE) 로 시작점 감지, LEN 으로 끝점 계산, CRC 로 유효성 검증
+    // MAVLink packet layout: [STX(1)][LEN(1)][SEQ(1)][SYS(1)][COMP(1)][MSGID(1)][PAYLOAD(LEN)][CRC(2)]
+    // Why feed the parser one byte at a time:
+    //   - a single UDP packet may contain several concatenated MAVLink messages
+    //   - the parser accumulates bytes in its internal buffer and returns true once
+    //     a packet is complete
+    //   - STX (0xFD/0xFE) marks the start, LEN determines the end, CRC validates it
     for (const char byte : data) {
-        // mavlink_parse_char: 바이트 1개를 상태머신에 공급
-        // 패킷이 완성(STX~CRC 전부 수신 + CRC 통과)되면 true 반환
-        // true 전까지는 _message에 접근하지 않고 계속 바이트를 쌓음
+        // mavlink_parse_char: feeds one byte into the state machine.
+        // Returns true once a packet is complete (STX..CRC all received + CRC passes).
+        // Until then, _message is not touched and bytes keep accumulating.
         if (mavlink_parse_char(MAVLINK_COMM_0,
                                static_cast<uint8_t>(byte),
                                &_message, &_status))
         {
-            // MSGID(1바이트, 0~255)로 메시지 종류 식별
-            // MSGID가 정해지면 페이로드 구조가 스펙에 고정되어 있어서
-            // mavlink_msg_xxx_decode()가 바이트 위치 기준으로 각 필드를 잘라 해석함
+            // The MSGID (1 byte, 0..255) identifies the message kind.
+            // Once the MSGID is known, the payload layout is fixed by the spec, so
+            // mavlink_msg_xxx_decode() slices each field out by byte offset.
             switch (_message.msgid) {
 
                 case MAVLINK_MSG_ID_HEARTBEAT: {
@@ -78,8 +80,9 @@ void MavlinkManager::parseBytes(const QByteArray& data)
                     const uint8_t fromSysid = _message.sysid;
                     const bool isAutopilot  = (hb.autopilot != MAV_AUTOPILOT_INVALID);
 
-                    // 중계기(autopilot=INVALID) HEARTBEAT는 차량 감지에서 제외.
-                    // 자동 latch는 하지 않음 — 사용자가 VEHICLES 카드 클릭 시 setActiveSysid로 활성.
+                    // A relay (autopilot=INVALID) HEARTBEAT is excluded from vehicle
+                    // detection. No automatic latch — the active vehicle is set via
+                    // setActiveSysid when the user clicks a VEHICLES card.
                     if (isAutopilot) {
                         _sysidCompid[fromSysid] = _message.compid;
                         if (!_detectedSysids.contains(fromSysid)) {
@@ -91,11 +94,11 @@ void MavlinkManager::parseBytes(const QByteArray& data)
                         }
                     }
 
-                    // autopilot HEARTBEAT 수신 시각 기록 (per-vehicle 워치독용).
+                    // Record the autopilot HEARTBEAT arrival time (for the per-vehicle watchdog).
                     if (isAutopilot)
                         _lastSeen[fromSysid] = _uptime.elapsed();
 
-                    // 모든 차량의 HEARTBEAT을 sysid 태그와 함께 전달 (VehicleManager가 분배).
+                    // Forward every vehicle's HEARTBEAT tagged with its sysid (VehicleManager routes it).
                     if (isAutopilot) {
                         MavlinkHeartbeat out;
                         out.sysid        = fromSysid;
@@ -128,20 +131,20 @@ void MavlinkManager::parseBytes(const QByteArray& data)
                     mavlink_sys_status_t sys;
                     mavlink_msg_sys_status_decode(&_message, &sys);
 
-                    // 모든 sysid → 카드 슬롯 (활성 필터 없음)
+                    // Every sysid → card slot (no active filter)
                     emit anyVehicleSysStatus(
                         static_cast<int>(_message.sysid),
                         static_cast<int>(static_cast<int8_t>(sys.battery_remaining)),
                         sys.voltage_battery / 1000.0f);
 
-                    // 모든 차량의 상세 상태를 sysid 태그와 함께 전달 (VehicleManager가 분배)
+                    // Forward every vehicle's detailed status tagged with its sysid (VehicleManager routes it)
                     {
                         MavlinkSysStatus out;
                         out.sysid            = _message.sysid;
                         out.voltageBattery   = sys.voltage_battery;
                         out.currentBattery   = sys.current_battery;
                         out.batteryRemaining = sys.battery_remaining;
-                        out.dropRateComm     = sys.drop_rate_comm;  // SITL: 항상 0
+                        out.dropRateComm     = sys.drop_rate_comm;  // SITL: always 0
                         out.errorsComm       = sys.errors_comm;
                         emit sysStatusReceived(out);
                     }
@@ -149,7 +152,7 @@ void MavlinkManager::parseBytes(const QByteArray& data)
                 }
 
                 case MAVLINK_MSG_ID_RADIO_STATUS: {
-                    // RADIO_STATUS는 라디오 모뎀이 보냄 (sysid 0 또는 51). 활성 차량 필터 안 함.
+                    // RADIO_STATUS is sent by the radio modem (sysid 0 or 51). No active-vehicle filter.
                     mavlink_radio_status_t radio;
                     mavlink_msg_radio_status_decode(&_message, &radio);
                     MavlinkRadioStatus out;
@@ -228,8 +231,8 @@ void MavlinkManager::parseBytes(const QByteArray& data)
 #ifdef MAVLINK_AVAILABLE
 // ─────────────────────────────────────────────────────────────────────────────
 // _emitMessage()
-// 빌드된 mavlink_message_t를 바이트 버퍼로 직렬화해 bytesToSend로 발신한다.
-// 모든 송신 함수(sendArmDisarm, sendManualControl, ...)가 공유.
+// Serializes a built mavlink_message_t into a byte buffer and emits it via
+// bytesToSend. Shared by all transmit functions (sendArmDisarm, sendManualControl, ...).
 // ─────────────────────────────────────────────────────────────────────────────
 void MavlinkManager::_emitMessage(mavlink_message_t& msg)
 {
@@ -243,12 +246,12 @@ void MavlinkManager::_emitMessage(mavlink_message_t& msg)
 
 // ─────────────────────────────────────────────────────────────────────────────
 // sendArmDisarm()
-// MAV_CMD_COMPONENT_ARM_DISARM (cmd=400)을 COMMAND_LONG으로 송신한다.
-// QGC와 동일한 방식 — MANUAL_CONTROL 비트마스크는 BTN_n_FUNCTION 매핑이 필요하지만,
-// COMMAND_LONG은 ArduSub이 무조건 처리한다.
+// Sends MAV_CMD_COMPONENT_ARM_DISARM (cmd=400) as a COMMAND_LONG. Same approach as
+// QGC — MANUAL_CONTROL button bits would need a BTN_n_FUNCTION mapping, whereas
+// ArduSub always acts on a COMMAND_LONG.
 //
 //   param1: 1.0 = arm,  0.0 = disarm
-//   param2: 0     = 안전체크 통과 후 무장,  21196 = 강제(force)
+//   param2: 0     = arm after passing safety checks,  21196 = force
 // ─────────────────────────────────────────────────────────────────────────────
 void MavlinkManager::sendArmDisarm(bool arm)
 {
@@ -256,18 +259,18 @@ void MavlinkManager::sendArmDisarm(bool arm)
     LOG_INFO("Send ARM_DISARM → target %d:%d : %s (force)",
              _activeSysid, _targetCompid, arm ? "ARM" : "DISARM");
 
-    // param2 = 21196 (magic value, QGC의 "Force Arm" 동일):
-    // pre-arm 체크를 우회. SITL/dev에서 GPS lock 없거나 EKF 미수렴이어도
-    // ARM 가능하게 함. 실차량 운용 시 안전 정책 별도 고려 필요.
+    // param2 = 21196 (magic value, same as QGC's "Force Arm"): bypasses the
+    // pre-arm checks, so arming is possible in SITL/dev even without a GPS lock or a
+    // converged EKF. A dedicated safety policy should be considered for real vehicles.
     mavlink_message_t msg;
     mavlink_msg_command_long_pack(
         255, 0, &msg,                     // GCS sysid, compid
-        _activeSysid, _targetCompid,      // target = HEARTBEAT에서 latch된 값
+        _activeSysid, _targetCompid,      // target = value latched from HEARTBEAT
         MAV_CMD_COMPONENT_ARM_DISARM,
         0,                                // confirmation
         arm ? 1.0f : 0.0f,                // param1
         arm ? 21196.0f : 0.0f,            // param2: 21196 = force when arming
-        0, 0, 0, 0, 0                     // param3~7 unused
+        0, 0, 0, 0, 0                     // param3..7 unused
     );
     _emitMessage(msg);
 #else
@@ -278,9 +281,9 @@ void MavlinkManager::sendArmDisarm(bool arm)
 
 // ─────────────────────────────────────────────────────────────────────────────
 // sendManualControl()
-// MAVLink MANUAL_CONTROL 패킷을 빌드하고 bytesToSend 신호로 발신한다.
-// target은 HEARTBEAT에서 latch된 값 사용. 50 Hz로 호출됨.
-// x/y/r: [-1000, 1000], z: [0, 1000] (500=중립)
+// Builds a MAVLink MANUAL_CONTROL packet and emits it via bytesToSend. The target
+// uses the sysid latched from HEARTBEAT. Called at 50 Hz.
+// x/y/r: [-1000, 1000], z: [0, 1000] (500 = neutral)
 // ─────────────────────────────────────────────────────────────────────────────
 void MavlinkManager::sendManualControl(int16_t x, int16_t y, int16_t z,
                                         int16_t r, uint16_t buttons)
@@ -293,13 +296,13 @@ void MavlinkManager::sendManualControl(int16_t x, int16_t y, int16_t z,
     }
 
     mavlink_message_t msg;
-    // buttons2/enabled_extensions/aux1~6/s/t: 사용하지 않으므로 0
+    // buttons2 / enabled_extensions / aux1..6 / s / t: unused, so 0
     mavlink_msg_manual_control_pack(255, 0, &msg,
                                     _activeSysid,
                                     x, y, z, r,
                                     buttons,
                                     0, 0,                  // buttons2, enabled_extensions
-                                    0, 0, 0, 0, 0, 0, 0, 0); // s, t, aux1~6
+                                    0, 0, 0, 0, 0, 0, 0, 0); // s, t, aux1..6
     _emitMessage(msg);
 #else
     Q_UNUSED(x); Q_UNUSED(y); Q_UNUSED(z); Q_UNUSED(r); Q_UNUSED(buttons);
@@ -309,8 +312,8 @@ void MavlinkManager::sendManualControl(int16_t x, int16_t y, int16_t z,
 
 // ─────────────────────────────────────────────────────────────────────────────
 // startHeartbeat() / stopHeartbeat()
-// linkConnected/linkDisconnected 에 연결. GCS HEARTBEAT 타이머와 차량 watchdog를
-// 함께 제어한다.
+// Connected to linkConnected/linkDisconnected. Controls the GCS HEARTBEAT timer
+// and the vehicle watchdog together.
 // ─────────────────────────────────────────────────────────────────────────────
 void MavlinkManager::startHeartbeat()
 {
@@ -328,8 +331,9 @@ void MavlinkManager::stopHeartbeat()
 }
 
 
-// per-vehicle 워치독 스윕: 마지막 HEARTBEAT가 kVehicleTimeoutMs 이상 끊긴 차량을
-// 추적에서 제거하고 vehicleTimedOut(sysid)을 발신한다 (링크는 유지).
+// Per-vehicle watchdog sweep: removes from tracking any vehicle whose last
+// HEARTBEAT is older than kVehicleTimeoutMs and emits vehicleTimedOut(sysid)
+// (the link stays up).
 void MavlinkManager::_sweepVehicles()
 {
     const qint64 now = _uptime.elapsed();
@@ -350,8 +354,8 @@ void MavlinkManager::_sweepVehicles()
 
 // ─────────────────────────────────────────────────────────────────────────────
 // resetVehicleLatch()
-// 연결 해제 시 호출. 감지된 sysid 목록과 active sysid를 모두 초기화한다.
-// 다음 연결의 첫 HEARTBEAT가 다시 latch 단계부터 진행.
+// Called on disconnect. Resets both the detected-sysid set and the active sysid,
+// so the next connection's first HEARTBEAT starts the latch process again.
 // ─────────────────────────────────────────────────────────────────────────────
 void MavlinkManager::resetVehicleLatch()
 {
@@ -368,8 +372,8 @@ void MavlinkManager::resetVehicleLatch()
 
 // ─────────────────────────────────────────────────────────────────────────────
 // setActiveSysid()
-// 사용자가 트리에서 다른 sysid를 클릭했을 때 호출. 0이면 active 해제.
-// 감지 목록에 없는 sysid라도 설정 가능 (대기 상태로).
+// Called when the user clicks a different sysid in the tree. 0 clears the active
+// vehicle. A sysid not in the detected set may still be set (pending state).
 // ─────────────────────────────────────────────────────────────────────────────
 void MavlinkManager::setActiveSysid(int sysid)
 {
@@ -377,7 +381,7 @@ void MavlinkManager::setActiveSysid(int sysid)
     if (s == _activeSysid) return;
     _activeSysid = s;
     if (s != 0)
-        _targetCompid = _sysidCompid.value(s, 1);   // 알려진 compid 또는 ArduSub 기본 1
+        _targetCompid = _sysidCompid.value(s, 1);   // known compid, or ArduSub's default of 1
     LOG_INFO("Active sysid switched to %d (compid=%d)", _activeSysid, _targetCompid);
     emit activeSysidChanged(sysid);
 }
@@ -385,11 +389,11 @@ void MavlinkManager::setActiveSysid(int sysid)
 
 // ─────────────────────────────────────────────────────────────────────────────
 // sendSetMode()
-// MAVLink SET_MODE 메시지로 ArduSub의 비행 모드를 변경한다.
-// base_mode에 MAV_MODE_FLAG_CUSTOM_MODE_ENABLED 비트를 켜고
-// custom_mode에 모드 번호 전달.
+// Changes ArduSub's flight mode via a MAVLink SET_MODE message. Sets the
+// MAV_MODE_FLAG_CUSTOM_MODE_ENABLED bit in base_mode and passes the mode number in
+// custom_mode.
 //
-// ArduSub custom_mode 값:
+// ArduSub custom_mode values:
 //   0=STABILIZE  1=ACRO  2=ALT_HOLD  3=AUTO  4=GUIDED  7=CIRCLE
 //   9=SURFACE  16=POSHOLD  19=MANUAL  20=MOTOR_DETECT
 // ─────────────────────────────────────────────────────────────────────────────

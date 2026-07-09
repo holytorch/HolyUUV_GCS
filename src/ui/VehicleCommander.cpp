@@ -25,7 +25,7 @@ void VehicleCommander::setArm(bool arm)
 
 void VehicleCommander::setMode(const QString& modeName)
 {
-    // ArduSub custom_mode 매핑. ArduPilot 펌웨어 정의 그대로.
+    // ArduSub custom_mode mapping, exactly as defined by the ArduPilot firmware.
     static const QMap<QString, uint32_t> kModeMap = {
         {"STABILIZE",     0},
         {"ACRO",          1},
@@ -53,7 +53,7 @@ void VehicleCommander::setMode(const QString& modeName)
 
 void VehicleCommander::sendManualControl(int x, int y, int z, int r, int buttons)
 {
-    // int → int16_t/uint16_t 안전 캐스트. QML은 int만 전달하므로 여기서 clamp.
+    // Safe int → int16_t/uint16_t cast. QML passes only int, so clamp here.
     auto clamp16 = [](int v) {
         if (v < -32768) v = -32768;
         if (v > 32767)  v = 32767;

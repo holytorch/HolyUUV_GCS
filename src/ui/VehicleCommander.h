@@ -6,11 +6,12 @@
 
 // ─────────────────────────────────────────────────────────────────────────────
 // VehicleCommander
-// QML → MAVLink 송신 브리지. QML(또는 다른 C++ 코드)이 Q_INVOKABLE 메서드로
-// arm/disarm/setMode를 요청하면, 시그널로 전파한다.
-// Application이 이 시그널을 MavlinkManager의 send* 슬롯에 연결한다.
+// A QML → MAVLink transmit bridge. When QML (or other C++ code) requests
+// arm/disarm/setMode via a Q_INVOKABLE method, it forwards the request as a signal.
+// Application connects these signals to MavlinkManager's send* slots.
 //
-// 송신만 책임. 현재 상태(armed 여부, 현재 mode)는 VehicleState를 보면 됨.
+// Responsible for transmission only. The current state (armed, current mode) is
+// read from VehicleState.
 // ─────────────────────────────────────────────────────────────────────────────
 class VehicleCommander : public QObject {
     Q_OBJECT
@@ -19,11 +20,11 @@ public:
     ~VehicleCommander() override;
 
     Q_INVOKABLE void setArm(bool arm);
-    // ArduSub 모드 이름. 인식하는 값: STABILIZE, ACRO, ALT_HOLD, AUTO, GUIDED,
-    // CIRCLE, SURFACE, POSHOLD, MANUAL, MOTOR_DETECT (대소문자 무관).
+    // ArduSub mode name. Recognized values: STABILIZE, ACRO, ALT_HOLD, AUTO, GUIDED,
+    // CIRCLE, SURFACE, POSHOLD, MANUAL, MOTOR_DETECT (case-insensitive).
     Q_INVOKABLE void setMode(const QString& modeName);
-    // QML 조이스틱 → MAVLink MANUAL_CONTROL. 50Hz로 호출 권장.
-    // x/y/r: [-1000, 1000], z: [0, 1000] (500=중립). buttons는 비트마스크.
+    // QML joystick → MAVLink MANUAL_CONTROL. Recommended to call at 50 Hz.
+    // x/y/r: [-1000, 1000], z: [0, 1000] (500 = neutral). buttons is a bitmask.
     Q_INVOKABLE void sendManualControl(int x, int y, int z, int r, int buttons);
 
 signals:

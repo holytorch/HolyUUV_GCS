@@ -23,11 +23,11 @@
 #include <Qt3DRender/QAttribute>
 #include <Qt3DRender/QBuffer>
 
-// TileServer가 중계하는 로컬 타일 URL 템플릿 (%1=z, %2=tx, %3=ty)
+// Local tile URL templates proxied by TileServer (%1=z, %2=tx, %3=ty)
 static const QString OSM_URL     = "http://localhost:17777/osm/%1/%2/%3.png";
 static const QString VOYAGER_URL = "http://localhost:17777/voyager/%1/%2/%3.png";
 
-// 수역 마스크 → 높이값
+// Water mask → height values
 static constexpr float SEA_DEPTH = -1000.0f;
 static constexpr float LAND_H    =     1.0f;
 
@@ -65,8 +65,9 @@ TerrainScene::~TerrainScene()
 
 // ─────────────────────────────────────────────────────────────────────────────
 // attachTo()
-// 외부 parent(QML Scene3D Entity)에 _rootEntity를 새로 만든다.
-// 이미 받아둔 청크 이미지가 있으면 네트워크 없이 메시를 재빌드한다.
+// Creates a fresh _rootEntity under the given external parent (the QML Scene3D
+// Entity). If chunk images have already been received, rebuilds the mesh without
+// any network access.
 // ─────────────────────────────────────────────────────────────────────────────
 void TerrainScene::attachTo(Qt3DCore::QEntity* parent)
 {
@@ -77,11 +78,11 @@ void TerrainScene::attachTo(Qt3DCore::QEntity* parent)
 
     _rootEntity = new Qt3DCore::QEntity(parent);
 
-    // 새 root → 기존 마커 엔티티 무효화 (포즈 데이터는 _markers에 유지 → 재빌드)
+    // New root → invalidate existing marker entities (pose data stays in _markers → rebuilt)
     for (auto& m : _markers) { m.entity = nullptr; m.xform = nullptr; }
 
     if (!_chunks.isEmpty()) {
-        // 캐시된 타일 이미지로 즉시 메시 재빌드
+        // Rebuild the mesh immediately from cached tile images
         for (auto it = _chunks.begin(); it != _chunks.end(); ++it) {
             it->entity = nullptr;
             it->built  = false;
@@ -96,13 +97,14 @@ void TerrainScene::attachTo(Qt3DCore::QEntity* parent)
         if (_activePos(lat, lon))
             loadTile(lat, lon, _zoom);
     }
-    // 둘 다 아니면(no cache, no GPS) QML 호출자가 loadTile로 트리거.
+    // If neither (no cache, no GPS), the QML caller triggers it via loadTile.
 }
 
 
 // ─────────────────────────────────────────────────────────────────────────────
 // loadTile()
-// 전역 좌표 원점을 (최초 1회) 고정하고, 현재 위치 주변 청크 로드를 시작한다.
+// Pins the global coordinate origin (once) and starts loading chunks around the
+// current position.
 // ─────────────────────────────────────────────────────────────────────────────
 void TerrainScene::loadTile(double lat, double lon, int zoom)
 {
@@ -121,7 +123,8 @@ void TerrainScene::loadTile(double lat, double lon, int zoom)
 }
 
 
-// 활성 차량의 위치를 반환 (마커 포즈가 있을 때만 true). 청크/카메라 추종에 사용.
+// Returns the active vehicle's position (true only when its marker has a pose).
+// Used by the chunk/camera follow logic.
 bool TerrainScene::_activePos(double& lat, double& lon) const
 {
     auto it = _markers.find(_activeSysid);
@@ -141,8 +144,9 @@ void TerrainScene::updateVehiclePosition(int sysid, double lat, double lon)
     VehicleMarker& m = _markers[sysid];
     m.lat = lat; m.lon = lon; m.hasPos = true;
 
-    // 첫 위치 fix → 전역 원점 고정 (모든 마커가 이 기준으로 배치). 기본 좌표로 열린
-    // 청크가 있으면 폐기 후 이 위치 기준으로 재로드 (화면 밖 이탈 방지).
+    // First position fix → pin the global origin (all markers are placed relative to
+    // it). If chunks were opened at the default coordinates, discard them and reload
+    // around this position (prevents drifting off-screen).
     if (!_firstFixReceived) {
         _firstFixReceived = true;
         if (_rootEntity) {
@@ -160,7 +164,7 @@ void TerrainScene::updateVehiclePosition(int sysid, double lat, double lon)
 
     _updateMarker(sysid);
 
-    // 활성 차량이면 청크/카메라가 따라간다 (새 타일 진입 시 갱신)
+    // For the active vehicle, the chunks/camera follow along (refreshed on entering a new tile)
     if (sysid == _activeSysid) {
         double gx, gy;
         latLonToGlobalPx(lat, lon, _zoom, gx, gy);
@@ -200,7 +204,8 @@ void TerrainScene::removeVehicle(int sysid)
 }
 
 
-// 청크 로딩/카메라가 추종할 활성 차량 지정. 새 활성 위치로 재중심한다.
+// Sets which active vehicle the chunk loading / camera follows. Re-centers on the
+// new active position.
 void TerrainScene::setActiveSysid(int sysid)
 {
     _activeSysid = sysid;
@@ -213,14 +218,14 @@ void TerrainScene::setActiveSysid(int sysid)
 
 // ─────────────────────────────────────────────────────────────────────────────
 // _updateChunks()
-// 중심(로봇) 타일 기준 렌더 반경 안의 청크를 로드하고, 밖의 청크를 언로드한다.
-// 로드 순서: 중심 → 전방(heading) → 거리순.
+// Loads the chunks within the render radius around the center (robot) tile and
+// unloads those outside. Load order: center → forward (heading) → by distance.
 // ─────────────────────────────────────────────────────────────────────────────
 void TerrainScene::_updateChunks()
 {
     if (!_originSet || !_rootEntity) return;
 
-    // 중심 = 활성 차량 위치(있으면), 없으면 마지막 loadTile 좌표
+    // Center = active vehicle position (if any), otherwise the last loadTile coordinates
     double clat = _lat, clon = _lon;
     _activePos(clat, clon);
 
@@ -233,7 +238,7 @@ void TerrainScene::_updateChunks()
 
     const int R = kRenderDist;
 
-    // 1) 언로드 — 렌더 반경 밖 청크 제거
+    // 1) Unload — remove chunks outside the render radius
     for (auto it = _chunks.begin(); it != _chunks.end(); ) {
         const int tx = it.key().first;
         const int ty = it.key().second;
@@ -246,9 +251,9 @@ void TerrainScene::_updateChunks()
         }
     }
 
-    // 2) 로드 — 반경 안의 미보유 청크를 우선순위 정렬해 요청
+    // 2) Load — request not-yet-held chunks within the radius, sorted by priority
     const double hdg = _vehicleHeading * M_PI / 180.0;
-    const double fx  = std::sin(hdg);   // 그리드: +x=동, +y=남 (heading 0=N → -y)
+    const double fx  = std::sin(hdg);   // grid: +x=east, +y=south (heading 0=N → -y)
     const double fy  = -std::cos(hdg);
 
     struct Req { int tx, ty; double score; };
@@ -260,8 +265,8 @@ void TerrainScene::_updateChunks()
             if (_chunks.contains(qMakePair(tx, ty))) continue;
             const double dist = std::sqrt(static_cast<double>(dx * dx + dy * dy));
             double align = 0.0;
-            if (dist > 1e-6) align = (dx * fx + dy * fy) / dist;   // 전방 정렬도 [-1,1]
-            // 점수 낮을수록 먼저: 중심(거리0) → 전방 → 측면 → 후방, 그다음 먼 거리
+            if (dist > 1e-6) align = (dx * fx + dy * fy) / dist;   // forward alignment [-1,1]
+            // Lower score loads first: center (dist 0) → forward → sides → rear, then by distance
             todo.push_back({tx, ty, dist - 0.5 * align});
         }
     }
@@ -275,7 +280,7 @@ void TerrainScene::_updateChunks()
 
 void TerrainScene::_requestChunk(int tx, int ty)
 {
-    // placeholder 항목 생성 (중복 요청 방지 — _updateChunks의 contains 체크가 본다)
+    // Create a placeholder entry (prevents duplicate requests — _updateChunks's contains check sees it)
     Chunk& ch = _chunks[qMakePair(tx, ty)];
     ch.osmReady = ch.voyagerReady = ch.built = false;
 
@@ -301,7 +306,7 @@ void TerrainScene::_onReplyFinished(QNetworkReply* reply)
 
     auto key = qMakePair(tx, ty);
     auto it  = _chunks.find(key);
-    if (it == _chunks.end()) return;   // 이미 언로드된 청크의 늦은 응답 — 무시
+    if (it == _chunks.end()) return;   // late reply for an already-unloaded chunk — ignore
     Chunk& ch = it.value();
 
     if (reply->error() == QNetworkReply::NoError) {
@@ -316,7 +321,7 @@ void TerrainScene::_onReplyFinished(QNetworkReply* reply)
                 ch.osmReady = true;
             }
         } else {
-            qWarning("Chunk (%d,%d) %s: 이미지 디코딩 실패", tx, ty, qPrintable(kind));
+            qWarning("Chunk (%d,%d) %s: image decode failed", tx, ty, qPrintable(kind));
         }
     } else {
         qWarning("Chunk (%d,%d) %s error: %s", tx, ty, qPrintable(kind),
@@ -330,8 +335,9 @@ void TerrainScene::_onReplyFinished(QNetworkReply* reply)
 
 // ─────────────────────────────────────────────────────────────────────────────
 // _buildChunkMesh()
-// 한 타일(청크)의 높이맵 + 텍스처로 Qt3D 메시 엔티티를 만든다.
-// 정점은 전역 좌표계에 배치되어 인접 청크와 자연히 이어진다.
+// Builds a Qt3D mesh entity from one tile (chunk)'s height map + texture.
+// Vertices are placed in the global coordinate system, so they naturally join with
+// neighboring chunks.
 // ─────────────────────────────────────────────────────────────────────────────
 void TerrainScene::_buildChunkMesh(int tx, int ty)
 {
@@ -347,13 +353,13 @@ void TerrainScene::_buildChunkMesh(int tx, int ty)
         ch.entity = nullptr;
     }
 
-    const int N = kChunkQuads;   // quad 수
-    const int V = N + 1;         // 한 변 정점 수
+    const int N = kChunkQuads;   // number of quads
+    const int V = N + 1;         // vertices per edge
 
     const double tilePxX = static_cast<double>(tx) * 256.0;
     const double tilePxY = static_cast<double>(ty) * 256.0;
 
-    // 수역 마스크 → 높이 (타일 픽셀 0..255)
+    // Water mask → height (tile pixels 0..255)
     auto heightAt = [&](int px, int py) -> float {
         px = qBound(0, px, 255);
         py = qBound(0, py, 255);
@@ -376,7 +382,7 @@ void TerrainScene::_buildChunkMesh(int tx, int ty)
             *vp++ = h * _heightScale;
             *vp++ = _worldZ(tilePxY + py);
 
-            // 노멀 (중앙 차분)
+            // Normal (central difference)
             const float hl = heightAt(px - 1, py), hr = heightAt(px + 1, py);
             const float hd = heightAt(px, py - 1), hu = heightAt(px, py + 1);
             float nx = (hl - hr) * _heightScale;
@@ -437,7 +443,7 @@ void TerrainScene::_buildChunkMesh(int tx, int ty)
     renderer->setGeometry(geometry);
     renderer->setPrimitiveType(Qt3DRender::QGeometryRenderer::Triangles);
 
-    // 텍스처 — OSM 타일을 임시 PNG로 저장 후 로드
+    // Texture — save the OSM tile to a temporary PNG, then load it
     static int seq = 0;
     ++seq;
     const QString texPath = QString("%1/holyuuv_chunk_%2_%3_%4.png")
@@ -469,7 +475,8 @@ void TerrainScene::_buildChunkMesh(int tx, int ty)
 }
 
 
-// sysid 마커(콘) 생성/위치/회전 갱신. 위치 fix가 있어야 렌더된다.
+// Creates/positions/rotates the sysid marker (cone). Rendered only once a position
+// fix exists.
 void TerrainScene::_updateMarker(int sysid)
 {
     if (!_rootEntity || !_originSet) return;
@@ -482,7 +489,8 @@ void TerrainScene::_updateMarker(int sysid)
     const float x = _worldX(gx);
     const float z = _worldZ(gy);
 
-    // 해수면(y=0) 기준 실제 수심만큼 마커를 내린다. 수평과 동일 스케일 → 비율 정확.
+    // Lower the marker by the real depth below sea level (y=0). Same scale as the
+    // horizontal → the proportions are correct.
     const float mpp           = static_cast<float>(metersPerPixel(m.lat, _zoom));
     const float unitsPerMeter = (mpp > 1e-9f) ? kWorldPerPixel / mpp : 0.0f;
     const float y             = -static_cast<float>(m.depth) * unitsPerMeter;
@@ -490,7 +498,7 @@ void TerrainScene::_updateMarker(int sysid)
     if (!m.entity) {
         auto* marker = new Qt3DCore::QEntity(_rootEntity.data());
 
-        // 방향성 콘(화살표) — 뱃머리 방향을 가리킨다. 기본 축은 +Y(뾰족한 끝).
+        // Directional cone (arrow) — points in the heading direction. Default axis is +Y (the tip).
         auto* cone = new Qt3DExtras::QConeMesh(marker);
         cone->setTopRadius(0.0f);
         cone->setBottomRadius(2.5f);
@@ -514,8 +522,9 @@ void TerrainScene::_updateMarker(int sysid)
         m.xform  = xform;
     }
 
-    // 콘을 수평으로 눕혀(tip→북) yaw만큼 회전 → 끝이 뱃머리(compass) 방향을 가리킴.
-    //   Rx(-90): +Y(끝) → -Z(북),  Ry(-yaw): 북 기준 시계방향으로 yaw만큼 스윙
+    // Lay the cone flat (tip→north) then rotate by yaw → the tip points in the
+    // vehicle's compass heading.
+    //   Rx(-90): +Y(tip) → -Z(north),  Ry(-yaw): swing clockwise from north by yaw
     const QQuaternion rot =
         QQuaternion::fromAxisAndAngle(0.0f, 1.0f, 0.0f, -static_cast<float>(m.yaw))
       * QQuaternion::fromAxisAndAngle(1.0f, 0.0f, 0.0f, -90.0f);

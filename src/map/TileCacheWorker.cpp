@@ -7,7 +7,7 @@
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ~TileCacheWorker()
-// DB 연결을 닫고 Qt SQL 드라이버에서 연결 이름을 제거한다.
+// Closes the DB connection and removes the connection name from the Qt SQL driver.
 // ─────────────────────────────────────────────────────────────────────────────
 TileCacheWorker::~TileCacheWorker()
 {
@@ -21,10 +21,10 @@ TileCacheWorker::~TileCacheWorker()
 
 // ─────────────────────────────────────────────────────────────────────────────
 // init()
-// 워커 스레드에서 실행된다. DB 파일 경로를 보장하고 SQLite 연결을 열고
-// WAL 모드를 설정한 뒤 tiles 테이블을 생성한다.
-// QSqlDatabase 연결은 생성한 스레드에만 귀속된다는 Qt 제약을 준수하기 위해
-// 반드시 이 함수 안에서 생성해야 한다.
+// Runs on the worker thread. Ensures the DB file path exists, opens the SQLite
+// connection, sets WAL mode, and creates the tiles table.
+// Must be created inside this function to honor Qt's constraint that a
+// QSqlDatabase connection belongs only to the thread that created it.
 // ─────────────────────────────────────────────────────────────────────────────
 void TileCacheWorker::init(const QString& dbPath)
 {
@@ -49,7 +49,8 @@ void TileCacheWorker::init(const QString& dbPath)
 
 // ─────────────────────────────────────────────────────────────────────────────
 // createTable()
-// tiles 테이블과 ts 인덱스를 생성한다 (없으면). ts는 LRU 삭제 기준으로 사용된다.
+// Creates the tiles table and the ts index (if absent). ts is used as the LRU
+// eviction key.
 // ─────────────────────────────────────────────────────────────────────────────
 void TileCacheWorker::createTable()
 {
@@ -67,9 +68,9 @@ void TileCacheWorker::createTable()
 
 // ─────────────────────────────────────────────────────────────────────────────
 // lookup()
-// key로 SQLite를 조회한다.
-//   히트: ts를 현재 시각으로 갱신(LRU 보존)하고 tileFound 신호를 발신한다.
-//   미스: tileMissed 신호를 발신해 TileServer가 원격 다운로드를 시작하게 한다.
+// Queries SQLite by key.
+//   hit:  refreshes ts to the current time (LRU preservation) and emits tileFound.
+//   miss: emits tileMissed so TileServer starts a remote download.
 // ─────────────────────────────────────────────────────────────────────────────
 void TileCacheWorker::lookup(const QString& key, QPointer<QTcpSocket> socket, const QString& url)
 {
@@ -95,8 +96,8 @@ void TileCacheWorker::lookup(const QString& key, QPointer<QTcpSocket> socket, co
 
 // ─────────────────────────────────────────────────────────────────────────────
 // store()
-// 타일 데이터를 SQLite에 저장(존재하면 교체)하고 evictIfNeeded()를 호출해
-// 캐시 크기를 제한 이하로 유지한다.
+// Stores the tile data in SQLite (replacing an existing row) and calls
+// evictIfNeeded() to keep the cache under its size limit.
 // ─────────────────────────────────────────────────────────────────────────────
 void TileCacheWorker::store(const QString& key, const QByteArray& data)
 {
@@ -117,8 +118,8 @@ void TileCacheWorker::store(const QString& key, const QByteArray& data)
 
 // ─────────────────────────────────────────────────────────────────────────────
 // evictIfNeeded()
-// 전체 데이터 크기가 MAX_BYTES(5 GB)를 초과하면 ts가 가장 오래된 타일부터
-// 삭제해 EVICT_BYTES(4 GB) 이하로 줄인다.
+// If the total data size exceeds MAX_BYTES (5 GB), deletes tiles starting from the
+// oldest ts until the cache is below EVICT_BYTES (4 GB).
 // ─────────────────────────────────────────────────────────────────────────────
 void TileCacheWorker::evictIfNeeded()
 {

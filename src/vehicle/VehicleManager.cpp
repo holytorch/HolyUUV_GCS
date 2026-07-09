@@ -1,6 +1,6 @@
 #include "VehicleManager.h"
 
-#include <QQmlEngine>   // setObjectOwnership — QML이 C++ 소유 객체를 GC하지 않도록
+#include <QQmlEngine>   // setObjectOwnership — keep QML from garbage-collecting C++-owned objects
 
 VehicleManager::VehicleManager(QObject* parent)
     : QAbstractListModel(parent)
@@ -16,7 +16,8 @@ VehicleState* VehicleManager::getOrCreate(int sysid)
     const int row = _order.size();
     beginInsertRows(QModelIndex(), row, row);
 
-    // parent=this → 매니저 소멸 시 자동 해제 (RAII). 소유는 C++ 측에만 둔다.
+    // parent=this → freed automatically when the manager is destroyed (RAII).
+    // Ownership stays entirely on the C++ side.
     auto* state = new VehicleState(sysid, this);
     QQmlEngine::setObjectOwnership(state, QQmlEngine::CppOwnership);
 
@@ -27,14 +28,15 @@ VehicleState* VehicleManager::getOrCreate(int sysid)
     emit vehicleAdded(sysid);
     emit countChanged();
 
-    // 사용자가 아직 안 골랐으면 가장 낮은 sysid(보통 1번)를 기본 활성으로 → 맵도 그쪽 중심.
+    // If the user has not picked yet, keep the lowest sysid (usually 1) as the
+    // default active → the map centers on it too.
     _applyDefaultActive();
 
     return state;
 }
 
 
-// 사용자가 카드를 누르기 전까지, 현재 존재하는 가장 낮은 sysid를 활성으로 유지.
+// Until the user clicks a card, keep the lowest currently existing sysid active.
 void VehicleManager::_applyDefaultActive()
 {
     if (_userPicked || _order.isEmpty()) return;
@@ -59,12 +61,13 @@ void VehicleManager::removeVehicle(int sysid)
     endRemoveRows();
 
     if (state)
-        state->deleteLater();   // 이벤트 루프 안전 삭제 (delegate 참조 정리 후)
+        state->deleteLater();   // event-loop-safe deletion (after delegate refs are cleared)
 
     emit vehicleRemoved(sysid);
     emit countChanged();
 
-    // 활성 차량이 사라졌으면 남은 것 중 가장 낮은 sysid로(없으면 0). 사용자 선택 플래그는 해제.
+    // If the active vehicle vanished, fall back to the lowest remaining sysid (0 if
+    // none). The user-pick flag is cleared.
     if (_activeSysid == sysid) {
         int next = 0;
         if (!_order.isEmpty()) {
@@ -86,7 +89,7 @@ void VehicleManager::clear()
         return;
     }
 
-    const QList<int> removed = _order;   // 마커 정리 통지용
+    const QList<int> removed = _order;   // for marker-cleanup notifications
 
     beginResetModel();
     const auto states = _vehicles.values();
@@ -97,12 +100,13 @@ void VehicleManager::clear()
     for (VehicleState* s : states)
         if (s) s->deleteLater();
 
-    // 각 차량 제거 통지 (TerrainScene 3D 마커 등 외부 정리용)
+    // Notify removal of each vehicle (for external cleanup, e.g. TerrainScene 3D markers)
     for (int sysid : removed)
         emit vehicleRemoved(sysid);
 
     emit countChanged();
-    // 연결 해제 → 사용자 선택 해제, 활성 0 (다음 연결 때 다시 기본=최저 sysid)
+    // Disconnect → clear the user pick, active = 0 (next connect defaults back to
+    // the lowest sysid).
     _userPicked  = false;
     if (_activeSysid != 0) {
         _activeSysid = 0;
@@ -111,7 +115,8 @@ void VehicleManager::clear()
 }
 
 
-// 사용자(카드 클릭)가 활성 차량을 고른다. 이후 자동 기본값이 덮어쓰지 않는다.
+// The user (card click) selects the active vehicle. The automatic default no
+// longer overrides it afterward.
 void VehicleManager::setActiveSysid(int sysid)
 {
     _userPicked = true;

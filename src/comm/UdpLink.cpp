@@ -3,7 +3,7 @@
 
 // ─────────────────────────────────────────────────────────────────────────────
 // UdpLink()
-// QUdpSocket 객체를 this의 자식으로 생성한다.
+// Creates the QUdpSocket as a child of this object.
 // ─────────────────────────────────────────────────────────────────────────────
 UdpLink::UdpLink(const UdpConfig& config, QObject* parent)
     : ILink(parent), _config(config)
@@ -14,7 +14,7 @@ UdpLink::UdpLink(const UdpConfig& config, QObject* parent)
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ~UdpLink()
-// 소멸 시 소켓을 닫는다.
+// Closes the socket on destruction.
 // ─────────────────────────────────────────────────────────────────────────────
 UdpLink::~UdpLink()
 {
@@ -24,8 +24,8 @@ UdpLink::~UdpLink()
 
 // ─────────────────────────────────────────────────────────────────────────────
 // connectLink()
-// 로컬 포트를 바인딩하고 readyRead 시그널을 연결한다.
-// UDP는 연결형이 아니므로 바인딩 성공 자체를 "연결됨"으로 처리한다.
+// Binds the local port and connects the readyRead signal. Since UDP is
+// connectionless, a successful bind is itself treated as "connected".
 // ─────────────────────────────────────────────────────────────────────────────
 bool UdpLink::connectLink()
 {
@@ -35,7 +35,7 @@ bool UdpLink::connectLink()
         return false;
     }
 
-    // UDP 수신 핵심 코드 (이벤트 기반 콜백)
+    // Core UDP receive path (event-driven callback).
     connect(_socket, &QUdpSocket::readyRead, this, &UdpLink::onReadyRead);
 
     _connected = true;
@@ -50,7 +50,7 @@ bool UdpLink::connectLink()
 
 // ─────────────────────────────────────────────────────────────────────────────
 // disconnectLink()
-// 소켓을 닫고 linkDisconnected를 발신한다.
+// Closes the socket and emits linkDisconnected.
 // ─────────────────────────────────────────────────────────────────────────────
 void UdpLink::disconnectLink()
 {
@@ -76,10 +76,11 @@ bool UdpLink::isConnected() const
 
 // ─────────────────────────────────────────────────────────────────────────────
 // sendBytes()
-// UDP 데이터그램을 전송한다 (QGC 방식).
-// 등록된 발신자(로봇)가 있으면 전원에게 보낸다 — HEARTBEAT은 브로드캐스트,
-// 명령은 페이로드의 target_system 덕에 대상 로봇만 처리한다 (다른 로봇은 무시).
-// 아직 발신자가 없으면 설정의 remoteHost:remotePort로 fallback (초기 인사용).
+// Transmits a UDP datagram (QGC-style). If any senders (robots) are registered,
+// the data is sent to all of them — heartbeats are broadcast, while commands are
+// acted on only by the addressed robot thanks to the payload's target_system
+// (others ignore it). If no sender has been seen yet, it falls back to the
+// configured remoteHost:remotePort (for the initial hello).
 // ─────────────────────────────────────────────────────────────────────────────
 bool UdpLink::sendBytes(const QByteArray& data)
 {
@@ -110,8 +111,9 @@ QString UdpLink::linkName() const
 
 // ─────────────────────────────────────────────────────────────────────────────
 // onReadyRead()
-// 대기 중인 데이터그램을 모두 읽는다. 새 발신자(로봇)가 push해오면 자동 등록해
-// 이후 송신 대상에 포함한다 (QGC 방식 — 포트 하나로 여러 로봇 수신).
+// Reads all pending datagrams. When a new sender (robot) pushes to us, it is
+// registered automatically so it is included in subsequent transmissions
+// (QGC-style — one port receiving many robots).
 // ─────────────────────────────────────────────────────────────────────────────
 void UdpLink::onReadyRead()
 {
